@@ -11,6 +11,10 @@
     let settings;
     let observer;
     let modal;
+    let globalLauncherBound = false;
+    let settingsLauncherAdded = false;
+    let launcherPositionFrame = 0;
+    const launcherMap = new Map();
     let state = createInitialState();
 
     function createInitialState() {
@@ -68,7 +72,7 @@
     }
 
     function setAllWorkbenchIcons(url) {
-        document.querySelectorAll('.qqaw-name-button img, .qqaw-title-icon').forEach((img) => {
+        document.querySelectorAll('.qqaw-name-button img, .qqaw-title-icon, #qqaw-settings-launcher img').forEach((img) => {
             img.src = url;
         });
     }
@@ -296,35 +300,197 @@
         });
     }
 
+    function getNameAnchor(message) {
+        if (!message?.isConnected) return null;
+        const candidates = [
+            message.querySelector('.name_text'),
+            message.querySelector('.ch_name .name_text'),
+            message.querySelector('.ch_name'),
+        ].filter(Boolean);
+
+        for (const element of candidates) {
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            if (style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0) {
+                return element;
+            }
+        }
+        return null;
+    }
+
+    function removeLauncher(message, button) {
+        button?.remove();
+        launcherMap.delete(message);
+        if (message?.dataset) delete message.dataset.qqawLauncherAttached;
+    }
+
+    function positionLauncher(message, button) {
+        if (!message?.isConnected || !button?.isConnected) {
+            removeLauncher(message, button);
+            return;
+        }
+
+        const name = getNameAnchor(message);
+        if (!name) {
+            button.hidden = true;
+            return;
+        }
+
+        const rect = name.getBoundingClientRect();
+        const style = getComputedStyle(name);
+        const fontSize = Number.parseFloat(style.fontSize) || 16;
+        const measuredHeight = rect.height > 0 ? rect.height : fontSize;
+        // 姓名有 transform / 自定义字号时，以实际视觉高度为准；避免异常主题把图标撑得过大。
+        const size = clamp(measuredHeight, 8, 48);
+        const gap = clamp(size * 0.18, 2, 8);
+        const left = rect.right + gap;
+        const top = rect.top + (rect.height - size) / 2;
+
+        // 姓名已经滚出聊天窗口时，不让悬浮入口残留在屏幕上。
+        const viewportW = globalThis.visualViewport?.width || window.innerWidth;
+        const viewportH = globalThis.visualViewport?.height || window.innerHeight;
+        if (rect.bottom < 0 || rect.top > viewportH || left < 0 || left > viewportW) {
+            button.hidden = true;
+            return;
+        }
+
+        button.hidden = false;
+        button.style.setProperty('--qqaw-name-size', `${size}px`);
+        button.style.setProperty('--qqaw-launcher-left', `${left}px`);
+        button.style.setProperty('--qqaw-launcher-top', `${top}px`);
+    }
+
+    function updateLauncherPositions() {
+        launcherPositionFrame = 0;
+        for (const [message, button] of [...launcherMap.entries()]) {
+            positionLauncher(message, button);
+        }
+    }
+
+    function scheduleLauncherPositions() {
+        if (launcherPositionFrame) return;
+        launcherPositionFrame = requestAnimationFrame(updateLauncherPositions);
+    }
+
     function createNameButton(message) {
-        const name = message.querySelector('.name_text');
-        if (!name || name.parentElement?.querySelector(':scope > .qqaw-name-button')) return;
+        if (!message?.isConnected) return;
+        const existing = launcherMap.get(message);
+        if (existing?.isConnected) {
+            scheduleLauncherPositions();
+            return;
+        }
+
+        const name = message.querySelector('.name_text') || message.querySelector('.ch_name');
+        if (!name) return;
 
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'qqaw-name-button';
         button.title = '打开丘丘头像工作台';
         button.setAttribute('aria-label', '打开丘丘头像工作台');
+        button.dataset.qqawLauncher = '1';
 
         const img = document.createElement('img');
         img.src = getIconUrl();
         img.alt = '';
         button.append(img);
 
-        button.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
+        // 不再把按钮插进 .ch_name 的文档流。很多美化会把 .name_text 绝对定位，
+        // 这会导致“姓名在顶部、按钮却掉到正文前面”。现在按钮挂到 body，
+        // 再按姓名的实际屏幕坐标贴在姓名右侧，因此能跟随绝对定位 / transform 的姓名。
+        button.__qqawMessage = message;
+        document.body.append(button);
+        launcherMap.set(message, button);
+        message.dataset.qqawLauncherAttached = '1';
+        scheduleLauncherPositions();
+
+        // 某些主题会在消息渲染后再做一次布局，延迟校准几次。
+        setTimeout(scheduleLauncherPositions, 50);
+        setTimeout(scheduleLauncherPositions, 300);
+        setTimeout(scheduleLauncherPositions, 1000);
+    }
+
+    function safeOpenWorkbenchFromMessage(message) {
+        try {
             const target = getTargetFromMessage(message);
             if (!target) {
                 notify('warning', '没有识别到这条消息对应的头像。');
                 return;
             }
             openWorkbench(target);
-        });
+        } catch (error) {
+            console.error('[丘丘头像工作台] 打开工作台失败', error);
+            notify('error', `打开工作台失败：${error?.message || error}`);
+        }
+    }
 
-        const nameFontSize = getComputedStyle(name).fontSize;
-        if (nameFontSize) button.style.setProperty('--qqaw-name-size', nameFontSize);
-        name.insertAdjacentElement('afterend', button);
+    function handleGlobalLauncherClick(event) {
+        const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+        const button = path.find?.((node) => node instanceof Element && node.classList?.contains('qqaw-name-button'))
+            || (event.target instanceof Element ? event.target.closest('.qqaw-name-button') : null);
+        if (!button) return;
+
+        // 在捕获阶段先处理，避免主题脚本 / 消息点击逻辑把事件吃掉。
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+
+        const message = button.__qqawMessage || button.closest('.mes');
+        if (!message) {
+            notify('warning', '没有找到这条消息，无法打开头像工作台。');
+            return;
+        }
+        safeOpenWorkbenchFromMessage(message);
+    }
+
+    function bindGlobalLauncher() {
+        if (globalLauncherBound) return;
+        globalLauncherBound = true;
+        window.addEventListener('click', handleGlobalLauncherClick, true);
+        // 使用捕获阶段监听所有可滚动容器；Tauri 美化常常不是 window 自己在滚动。
+        window.addEventListener('scroll', scheduleLauncherPositions, true);
+        window.addEventListener('resize', scheduleLauncherPositions, { passive: true });
+        window.addEventListener('orientationchange', scheduleLauncherPositions, { passive: true });
+        globalThis.visualViewport?.addEventListener?.('scroll', scheduleLauncherPositions, { passive: true });
+        globalThis.visualViewport?.addEventListener?.('resize', scheduleLauncherPositions, { passive: true });
+    }
+
+    function openFromSettingsLauncher() {
+        try {
+            const target = latestMessageTarget('char') || latestMessageTarget('user');
+            if (!target) {
+                notify('warning', '请先进入一个有聊天消息的对话，再打开丘丘头像工作台。');
+                return;
+            }
+            openWorkbench(target);
+        } catch (error) {
+            console.error('[丘丘头像工作台] 设置页入口打开失败', error);
+            notify('error', `打开工作台失败：${error?.message || error}`);
+        }
+    }
+
+    function addSettingsLauncher() {
+        if (settingsLauncherAdded || document.querySelector('#qqaw-settings-launcher')) return;
+        const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings');
+        if (!host) {
+            setTimeout(addSettingsLauncher, 1200);
+            return;
+        }
+
+        const wrap = document.createElement('div');
+        wrap.id = 'qqaw-settings-launcher';
+        wrap.className = 'qqaw-settings-launcher';
+        wrap.innerHTML = `
+            <div class="qqaw-settings-launcher-title">
+                <img alt="" src="${getIconUrl().replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
+                <b>丘丘头像工作台</b>
+            </div>
+            <button type="button" class="menu_button" id="qqaw-settings-open">打开工作台</button>
+            <small>如果聊天姓名后的图标被当前美化拦截，可以先从这里打开。</small>
+        `;
+        host.append(wrap);
+        wrap.querySelector('#qqaw-settings-open')?.addEventListener('click', openFromSettingsLauncher);
+        settingsLauncherAdded = true;
     }
 
     function scanMessages(root = document) {
@@ -334,6 +500,7 @@
             createNameButton(message);
         });
         refreshAllAvatarLayouts(root);
+        scheduleLauncherPositions();
     }
 
     function buildModal() {
@@ -1069,10 +1236,12 @@
             context = await waitForSillyTavern();
             ensureSettings();
             buildModal();
+            bindGlobalLauncher();
+            addSettingsLauncher();
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.0 已加载');
+            console.info('[丘丘头像工作台] v0.1.2 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

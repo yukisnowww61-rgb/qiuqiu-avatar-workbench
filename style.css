@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.1.0 */
+/* 丘丘头像工作台 v0.1.2 */
 
 .qqaw-name-button {
     appearance: none;
@@ -6,29 +6,38 @@
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
+    position: fixed !important;
+    left: var(--qqaw-launcher-left, -9999px) !important;
+    top: var(--qqaw-launcher-top, -9999px) !important;
     width: var(--qqaw-name-size, 1em) !important;
     height: var(--qqaw-name-size, 1em) !important;
     min-width: var(--qqaw-name-size, 1em) !important;
     min-height: var(--qqaw-name-size, 1em) !important;
-    margin: 0 0 0 0.28em !important;
+    margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
     outline: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
-    vertical-align: -0.08em;
     cursor: pointer;
     line-height: 1 !important;
     overflow: visible !important;
-    flex: 0 0 var(--qqaw-name-size, 1em) !important;
+    z-index: 2147480000 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.qqaw-name-button[hidden] {
+    display: none !important;
 }
 
 .qqaw-name-button img {
     display: block !important;
-    width: var(--qqaw-name-size, 1em) !important;
-    height: var(--qqaw-name-size, 1em) !important;
-    min-width: var(--qqaw-name-size, 1em) !important;
-    min-height: var(--qqaw-name-size, 1em) !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
     max-width: none !important;
     max-height: none !important;
     object-fit: contain !important;
@@ -404,4 +413,35 @@ body.qqaw-modal-open {
     #qqaw-target-file {
         max-width: 44vw;
     }
+}
+
+
+/* 设置页备用入口：用于某些主题/Tauri WebView 拦截消息区点击时兜底。 */
+.qqaw-settings-launcher {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+}
+
+.qqaw-settings-launcher-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-right: auto;
+}
+
+.qqaw-settings-launcher-title img {
+    width: 1.35em;
+    height: 1.35em;
+    object-fit: contain;
+}
+
+.qqaw-settings-launcher small {
+    flex-basis: 100%;
+    opacity: .65;
 }

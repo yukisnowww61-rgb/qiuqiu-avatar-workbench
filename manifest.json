@@ -5,6 +5,9 @@
   "js": "index.js",
   "css": "style.css",
   "author": "丘丘",
-  "version": "0.1.0",
-  "auto_update": true
+  "version": "0.1.2",
+  "auto_update": true,
+  "requires": [],
+  "optional": [],
+  "homePage": "https://github.com/yukisnowww61-rgb/qiuqiu-avatar-workbench"
 }

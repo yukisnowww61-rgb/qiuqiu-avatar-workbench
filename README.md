@@ -2,7 +2,7 @@
 
 一个面向 SillyTavern 的前端 UI Extension，用于快速处理当前聊天中的 USER（Persona）和 CHAR（Character）头像。
 
-## v0.1.0 已实现
+## v0.1.2 已实现
 
 - 在每条消息的**姓名后面**自动添加“丘丘头像工作台”图标，图标高度跟随姓名字号。
 - 默认图标：`https://imgbed.heliar.top/i/hWLZsEjJm7_lklfn_IMG_1048.gif`
@@ -46,7 +46,7 @@ data/<你的用户目录>/extensions/qiuqiu-avatar-workbench/
 
 ## 注意
 
-- v0.1.0 的“显示范围”主要作用于 SillyTavern 页面中的 `.avatar img` 头像元素。Chromium / WebView2 环境会优先使用 `object-view-box` 调整图像内容，因此不会为了缩放而改变头像元素本身的尺寸；不支持该属性的浏览器会使用兼容回退方案。
+- v0.1.2 的“显示范围”主要作用于 SillyTavern 页面中的 `.avatar img` 头像元素。Chromium / WebView2 环境会优先使用 `object-view-box` 调整图像内容，因此不会为了缩放而改变头像元素本身的尺寸；不支持该属性的浏览器会使用兼容回退方案。
 - 某些高度定制的主题如果强制覆盖了头像的 `object-fit` / `object-position` / `clip-path` 等属性，可能需要为主题额外增加兼容 CSS。
 - “裁剪并替换”会输出静态 PNG；如果原头像是 GIF，裁剪后不会保留动画。
 - 群聊中请优先从**要修改的那个角色自己的消息**后点击工作台图标，以便准确识别 Character。
@@ -64,3 +64,18 @@ data/<你的用户目录>/extensions/qiuqiu-avatar-workbench/
 ## License
 
 MIT
+
+
+## v0.1.2 修复
+
+- 修复部分 TauriTavern / 手机美化下，姓名后的工作台图标可见但点击没有反应的问题。
+- 点击监听改为 window 捕获阶段，减少消息层脚本拦截。
+- 图标增加 pointer-events / z-index / touch-action 兼容。
+- 在“扩展设置”中增加一个备用「打开工作台」入口。
+- 如果打开仍失败，会直接弹出具体错误提示，方便继续排查。
+
+## v0.1.2：姓名后图标定位修复
+
+针对 TauriTavern / 高度自定义主题中 `.name_text` 使用 `position:absolute`、`transform` 等情况，入口图标不再直接插入姓名所在的文档流，而是读取姓名真实的屏幕位置，将图标悬浮贴在姓名右侧。这样可避免图标掉到消息正文前方。滚动、旋转屏幕和窗口尺寸变化时都会重新定位。
+
+仓库：`https://github.com/yukisnowww61-rgb/qiuqiu-avatar-workbench`
