@@ -3,6 +3,7 @@
 
     const MODULE_ID = 'qiuqiu_avatar_workbench';
     const EXTENSION_FIELD = 'qiuqiu_avatar_workbench';
+    const CHAT_METADATA_FIELD = 'qiuqiu_avatar_workbench';
     const DEFAULT_ICON_URL = 'https://imgbed.heliar.top/i/hWLZsEjJm7_lklfn_IMG_1048.gif';
     const DEFAULT_LAYOUT = Object.freeze({ x: 50, y: 50, zoom: 1 });
     const DEFAULT_ASPECT = Object.freeze({ w: 2, h: 3, label: '2:3' });
@@ -14,6 +15,8 @@
     let globalLauncherBound = false;
     let settingsLauncherAdded = false;
     let launcherPositionFrame = 0;
+    let modalMoveState = null;
+    let modalResizeState = null;
     const launcherMap = new Map();
     let state = createInitialState();
 
@@ -31,6 +34,7 @@
             dragStart: null,
             pointers: new Map(),
             pinchStart: null,
+            replaceScope: 'permanent',
         };
     }
 
@@ -53,6 +57,8 @@
             characterLayouts: {},
             preferredAspect: '2:3',
             launcherGap: 2,
+            replaceScope: 'permanent',
+            modalRect: null,
         };
     }
 
@@ -61,7 +67,8 @@
         settings = Object.assign(getDefaults(), current);
         settings.personaLayouts ??= {};
         settings.characterLayouts ??= {};
-        settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -8, 40);
+        settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
+        settings.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
         context.extensionSettings[MODULE_ID] = settings;
     }
 
@@ -123,6 +130,58 @@
         const nameNode = message.querySelector('.name_text');
         const parsed = parseAvatarRef(img?.src);
         const displayName = nameNode?.textContent?.trim() || (isUser ? context.name1 : context.name2) || '';
+        const originalKey = message.dataset.qqawOriginalKey || '';
+        const originalKind = message.dataset.qqawOriginalKind || '';
+        const originalCharId = message.dataset.qqawOriginalCharId;
+        const tempOverride = parsed?.file?.startsWith('__qqaw_chat_')
+            ? allChatOverrides().find((item) => item?.file === parsed.file && item.kind === (isUser ? 'user' : 'char'))
+            : null;
+
+        if (tempOverride) {
+            if (isUser) {
+                return {
+                    kind: 'user',
+                    key: tempOverride.targetKey || '',
+                    name: tempOverride.targetName || displayName || 'USER',
+                    sourceUrl: img?.src || '',
+                    charId: null,
+                    character: null,
+                };
+            }
+            const tempCharId = tempOverride.charId != null && Number.isInteger(Number(tempOverride.charId)) ? Number(tempOverride.charId) : null;
+            const tempCharacter = tempCharId != null ? context.characters?.[tempCharId] : getCharacterByAvatar(tempOverride.targetKey)?.character;
+            return {
+                kind: 'char',
+                key: tempOverride.targetKey || tempCharacter?.avatar || '',
+                name: tempOverride.targetName || tempCharacter?.name || tempCharacter?.data?.name || displayName || 'CHAR',
+                sourceUrl: img?.src || '',
+                charId: tempCharId,
+                character: tempCharacter ?? null,
+            };
+        }
+
+        if (originalKey && originalKind === (isUser ? 'user' : 'char')) {
+            if (isUser) {
+                return {
+                    kind: 'user',
+                    key: originalKey,
+                    name: message.dataset.qqawOriginalName || displayName || 'USER',
+                    sourceUrl: img?.src || '',
+                    charId: null,
+                    character: null,
+                };
+            }
+            const charId = originalCharId !== '' && Number.isInteger(Number(originalCharId)) ? Number(originalCharId) : null;
+            const character = charId != null ? context.characters?.[charId] : getCharacterByAvatar(originalKey)?.character;
+            return {
+                kind: 'char',
+                key: originalKey,
+                name: message.dataset.qqawOriginalName || character?.name || character?.data?.name || displayName || 'CHAR',
+                sourceUrl: img?.src || '',
+                charId,
+                character: character ?? null,
+            };
+        }
 
         if (isUser) {
             const key = parsed?.type === 'persona' ? parsed.file : parsed?.file;
@@ -137,15 +196,22 @@
         }
 
         let match = parsed?.file ? getCharacterByAvatar(parsed.file) : null;
+        if (!match && displayName) {
+            const byName = (context.characters ?? []).findIndex((char) => (char?.name || char?.data?.name || '') === displayName);
+            if (byName >= 0) match = { character: context.characters[byName], charId: byName };
+        }
         if (!match && context.groupId == null && context.characterId != null && context.characterId !== '' && Number.isInteger(Number(context.characterId))) {
             const charId = Number(context.characterId);
             const character = context.characters?.[charId];
             if (character) match = { character, charId };
         }
 
+        const resolvedCharKey = parsed?.type === 'avatar' && parsed?.file && !parsed.file.startsWith('__qqaw_chat_')
+            ? parsed.file
+            : (match?.character?.avatar || parsed?.file || '');
         return {
             kind: 'char',
-            key: parsed?.file || match?.character?.avatar || '',
+            key: resolvedCharKey,
             name: match?.character?.name || match?.character?.data?.name || displayName || 'CHAR',
             sourceUrl: img?.src || '',
             charId: match?.charId ?? null,
@@ -247,6 +313,11 @@
     }
 
     function layoutForAvatarImage(img) {
+        const message = img?.closest?.('.mes');
+        if (message?.dataset?.qqawOriginalKey) {
+            const target = getTargetFromMessage(message);
+            if (target?.key) return getSavedLayout(target);
+        }
         const parsed = parseAvatarRef(img?.src);
         if (!parsed?.file) return null;
         if (parsed.type === 'persona') {
@@ -320,6 +391,25 @@
         return null;
     }
 
+    function getVisualTextRect(element) {
+        if (!element) return null;
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+            range.detach?.();
+            if (!rects.length) return null;
+            const left = Math.min(...rects.map((rect) => rect.left));
+            const top = Math.min(...rects.map((rect) => rect.top));
+            const right = Math.max(...rects.map((rect) => rect.right));
+            const bottom = Math.max(...rects.map((rect) => rect.bottom));
+            return { left, top, right, bottom, width: right - left, height: bottom - top };
+        } catch (error) {
+            console.debug('[丘丘头像工作台] 无法测量姓名文字范围，回退到元素范围。', error);
+            return null;
+        }
+    }
+
     function getLauncherHost(_name, message) {
         if (!message) return null;
         // 入口直接挂在对应 .mes 上：这样滚动时它和该消息是同一个坐标系，
@@ -356,13 +446,13 @@
         if (button.parentElement !== host) host.append(button);
         button.__qqawHost = host;
 
-        const nameRect = name.getBoundingClientRect();
+        const nameRect = getVisualTextRect(name) || name.getBoundingClientRect();
         const hostRect = host.getBoundingClientRect();
         const style = getComputedStyle(name);
         const fontSize = Number.parseFloat(style.fontSize) || 16;
         const measuredHeight = nameRect.height > 0 ? nameRect.height : fontSize;
         const size = clamp(measuredHeight, 8, 48);
-        const gap = clamp(Number(settings.launcherGap ?? 2), -8, 40);
+        const gap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
 
         // 这里使用“姓名坐标 - 宿主坐标”，得到宿主内部坐标。
         // 因为按钮是 absolute 且挂在消息内部，它会天然随着这条消息滚动，
@@ -512,6 +602,7 @@
             if (message.classList.contains('template_element') || message.id === 'message_template') return;
             createNameButton(message);
         });
+        applyChatScopedOverrides(root);
         refreshAllAvatarLayouts(root);
         scheduleLauncherPositions();
     }
@@ -522,7 +613,7 @@
         overlay.className = 'qqaw-hidden';
         overlay.innerHTML = `
             <section id="qqaw-modal" role="dialog" aria-modal="true" aria-labelledby="qqaw-title">
-                <header class="qqaw-header">
+                <header class="qqaw-header" id="qqaw-drag-handle" title="拖动这里移动工作台">
                     <div class="qqaw-title-wrap">
                         <img class="qqaw-title-icon" alt="" />
                         <div>
@@ -530,7 +621,10 @@
                             <div id="qqaw-subtitle">快速更换 · 自由裁剪 · 非破坏式构图</div>
                         </div>
                     </div>
-                    <button type="button" id="qqaw-close" class="qqaw-icon-button" aria-label="关闭">×</button>
+                    <div class="qqaw-window-actions">
+                        <button type="button" id="qqaw-reset-window" class="qqaw-icon-button" aria-label="恢复窗口大小" title="恢复窗口大小和位置">↙</button>
+                        <button type="button" id="qqaw-close" class="qqaw-icon-button" aria-label="关闭">×</button>
+                    </div>
                 </header>
 
                 <div class="qqaw-body">
@@ -585,6 +679,14 @@
 
                             <div class="qqaw-divider"></div>
 
+                            <div class="qqaw-control-title">替换范围</div>
+                            <div class="qqaw-scope-row" role="group" aria-label="头像替换范围">
+                                <button type="button" class="qqaw-scope-button" data-scope="chat">仅本次聊天</button>
+                                <button type="button" class="qqaw-scope-button" data-scope="permanent">永久替换</button>
+                            </div>
+                            <div id="qqaw-scope-note" class="qqaw-small-note"></div>
+                            <button type="button" id="qqaw-clear-chat-avatar" class="menu_button qqaw-clear-chat-avatar" hidden>取消本次聊天覆盖</button>
+
                             <button type="button" id="qqaw-replace-avatar" class="menu_button qqaw-dangerous">裁剪并替换头像</button>
                             <div class="qqaw-small-note">替换时固定输出 512×768（2:3）。图片只会被等比例裁切和缩放，不会横向或纵向拉伸。</div>
                         </section>
@@ -605,12 +707,20 @@
                             </div>
                             <label class="qqaw-slider-row qqaw-gap-control">
                                 <span>图标到姓名距离 <output id="qqaw-gap-value">2 px</output></span>
-                                <input id="qqaw-launcher-gap" type="range" min="-8" max="40" step="1" value="2" />
+                                <input id="qqaw-launcher-gap" type="range" min="-24" max="60" step="1" value="2" />
                             </label>
                             <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。负数会让图标更贴近姓名；入口固定在每条消息内部，会随该消息一起滚动。</div>
                         </div>
                     </details>
                 </div>
+                <div class="qqaw-resize-handle qqaw-resize-n" data-dir="n"></div>
+                <div class="qqaw-resize-handle qqaw-resize-e" data-dir="e"></div>
+                <div class="qqaw-resize-handle qqaw-resize-s" data-dir="s"></div>
+                <div class="qqaw-resize-handle qqaw-resize-w" data-dir="w"></div>
+                <div class="qqaw-resize-handle qqaw-resize-ne" data-dir="ne"></div>
+                <div class="qqaw-resize-handle qqaw-resize-se" data-dir="se"></div>
+                <div class="qqaw-resize-handle qqaw-resize-sw" data-dir="sw"></div>
+                <div class="qqaw-resize-handle qqaw-resize-nw" data-dir="nw"></div>
             </section>
         `;
         document.body.append(overlay);
@@ -622,8 +732,21 @@
     function bindModalEvents() {
         const $ = (selector) => modal.querySelector(selector);
         $('#qqaw-close').addEventListener('click', closeWorkbench);
+        $('#qqaw-reset-window').addEventListener('click', resetModalWindow);
         modal.addEventListener('click', (event) => {
             if (event.target === modal) closeWorkbench();
+        });
+
+        const dragHandle = $('#qqaw-drag-handle');
+        dragHandle.addEventListener('pointerdown', beginModalMove);
+        dragHandle.addEventListener('pointermove', moveModal);
+        dragHandle.addEventListener('pointerup', endModalMove);
+        dragHandle.addEventListener('pointercancel', endModalMove);
+        modal.querySelectorAll('.qqaw-resize-handle').forEach((handle) => {
+            handle.addEventListener('pointerdown', beginModalResize);
+            handle.addEventListener('pointermove', resizeModal);
+            handle.addEventListener('pointerup', endModalResize);
+            handle.addEventListener('pointercancel', endModalResize);
         });
 
         modal.querySelectorAll('.qqaw-target-button').forEach((button) => {
@@ -653,6 +776,16 @@
         });
         $('#qqaw-save-layout').addEventListener('click', saveCurrentDisplayLayout);
         $('#qqaw-replace-avatar').addEventListener('click', replaceAvatar);
+        $('#qqaw-clear-chat-avatar').addEventListener('click', removeCurrentChatOverride);
+        modal.querySelectorAll('.qqaw-scope-button').forEach((button) => {
+            button.addEventListener('click', () => {
+                state.replaceScope = button.dataset.scope === 'chat' ? 'chat' : 'permanent';
+                settings.replaceScope = state.replaceScope;
+                saveSettings();
+                syncTargetUi();
+                syncReplaceScopeUi();
+            });
+        });
 
         const shell = $('#qqaw-preview-shell');
         shell.addEventListener('pointerdown', beginDrag);
@@ -666,11 +799,191 @@
         $('#qqaw-icon-file').addEventListener('change', applyLocalIcon);
         $('#qqaw-reset-icon').addEventListener('click', resetWorkbenchIcon);
         $('#qqaw-launcher-gap').addEventListener('input', () => {
-            settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -8, 40);
+            settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
             $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
             saveSettings();
-            scheduleLauncherPositions();
+            updateLauncherPositions();
         });
+    }
+
+    function getModalPanel() {
+        return modal?.querySelector('#qqaw-modal') ?? null;
+    }
+
+    function clampModalRect(rect) {
+        const viewportW = Math.max(300, globalThis.visualViewport?.width || window.innerWidth || 800);
+        const viewportH = Math.max(360, globalThis.visualViewport?.height || window.innerHeight || 700);
+        const minW = Math.min(280, viewportW - 8);
+        const minH = Math.min(320, viewportH - 8);
+        const maxW = Math.max(minW, viewportW - 8);
+        const maxH = Math.max(minH, viewportH - 8);
+        const width = clamp(Number(rect?.width || Math.min(820, viewportW - 24)), minW, maxW);
+        const height = clamp(Number(rect?.height || Math.min(760, viewportH - 24)), minH, maxH);
+        const left = clamp(Number(rect?.left ?? (viewportW - width) / 2), 4, Math.max(4, viewportW - width - 4));
+        const top = clamp(Number(rect?.top ?? (viewportH - height) / 2), 4, Math.max(4, viewportH - height - 4));
+        return { left, top, width, height };
+    }
+
+    function applyModalRect(rect, persist = false) {
+        const panel = getModalPanel();
+        if (!panel) return;
+        const safe = clampModalRect(rect);
+        panel.style.left = `${safe.left}px`;
+        panel.style.top = `${safe.top}px`;
+        panel.style.width = `${safe.width}px`;
+        panel.style.height = `${safe.height}px`;
+        if (persist) {
+            settings.modalRect = safe;
+            saveSettings();
+        }
+    }
+
+    function resetModalWindow() {
+        settings.modalRect = null;
+        saveSettings();
+        applyModalRect(null, false);
+    }
+
+    function persistCurrentModalRect() {
+        const panel = getModalPanel();
+        if (!panel) return;
+        const rect = panel.getBoundingClientRect();
+        applyModalRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, true);
+    }
+
+    function beginModalMove(event) {
+        if (event.button != null && event.button !== 0) return;
+        if (event.target.closest('button, input, select, textarea, a, summary')) return;
+        const panel = getModalPanel();
+        if (!panel) return;
+        const rect = panel.getBoundingClientRect();
+        modalMoveState = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+        };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    }
+
+    function moveModal(event) {
+        if (!modalMoveState || event.pointerId !== modalMoveState.pointerId) return;
+        const next = {
+            left: modalMoveState.left + (event.clientX - modalMoveState.startX),
+            top: modalMoveState.top + (event.clientY - modalMoveState.startY),
+            width: modalMoveState.width,
+            height: modalMoveState.height,
+        };
+        applyModalRect(next, false);
+    }
+
+    function endModalMove(event) {
+        if (!modalMoveState || event.pointerId !== modalMoveState.pointerId) return;
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        modalMoveState = null;
+        persistCurrentModalRect();
+    }
+
+    function beginModalResize(event) {
+        if (event.button != null && event.button !== 0) return;
+        const panel = getModalPanel();
+        if (!panel) return;
+        const rect = panel.getBoundingClientRect();
+        modalResizeState = {
+            pointerId: event.pointerId,
+            dir: event.currentTarget.dataset.dir || 'se',
+            startX: event.clientX,
+            startY: event.clientY,
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+        };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function resizeModal(event) {
+        if (!modalResizeState || event.pointerId !== modalResizeState.pointerId) return;
+        const state0 = modalResizeState;
+        const dx = event.clientX - state0.startX;
+        const dy = event.clientY - state0.startY;
+        let left = state0.left;
+        let top = state0.top;
+        let width = state0.width;
+        let height = state0.height;
+        if (state0.dir.includes('e')) width += dx;
+        if (state0.dir.includes('s')) height += dy;
+        if (state0.dir.includes('w')) {
+            left += dx;
+            width -= dx;
+        }
+        if (state0.dir.includes('n')) {
+            top += dy;
+            height -= dy;
+        }
+        applyModalRect({ left, top, width, height }, false);
+    }
+
+    function endModalResize(event) {
+        if (!modalResizeState || event.pointerId !== modalResizeState.pointerId) return;
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        modalResizeState = null;
+        persistCurrentModalRect();
+    }
+
+    function syncReplaceScopeUi() {
+        if (!modal) return;
+        modal.querySelectorAll('.qqaw-scope-button').forEach((button) => {
+            button.classList.toggle('active', button.dataset.scope === state.replaceScope);
+        });
+        const note = modal.querySelector('#qqaw-scope-note');
+        const replace = modal.querySelector('#qqaw-replace-avatar');
+        if (state.replaceScope === 'chat') {
+            note.textContent = '只覆盖当前聊天中的这个头像，不修改角色卡或 Persona 本体；切换到别的聊天仍使用原头像。';
+            replace.textContent = '裁剪并替换 · 仅本次聊天';
+        } else {
+            note.textContent = '直接修改 Character / Persona 的头像文件，其他聊天也会使用新头像。';
+            replace.textContent = '裁剪并替换 · 永久';
+        }
+        const clearButton = modal.querySelector('#qqaw-clear-chat-avatar');
+        if (clearButton) clearButton.hidden = !getChatOverrideForTarget(state.target);
+    }
+
+    async function removeCurrentChatOverride() {
+        if (!state.target) return;
+        try {
+            const target = { ...state.target };
+            await clearChatOverride(target);
+            const fresh = withCacheBust(directAvatarUrl(target));
+            document.querySelectorAll('#chat .mes:not(.template_element)').forEach((message) => {
+                const candidate = getTargetFromMessage(message);
+                const same = candidate?.kind === target.kind && (
+                    (candidate.key && target.key && candidate.key === target.key)
+                    || (candidate.name && target.name && candidate.name === target.name)
+                    || (target.kind === 'char' && candidate.charId != null && target.charId != null && candidate.charId === target.charId)
+                );
+                if (!same) return;
+                delete message.dataset.qqawOriginalKind;
+                delete message.dataset.qqawOriginalKey;
+                delete message.dataset.qqawOriginalName;
+                delete message.dataset.qqawOriginalCharId;
+                message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, fresh));
+            });
+            state.target.sourceUrl = fresh;
+            await loadTargetImage(true);
+            refreshAllAvatarLayouts(document);
+            syncReplaceScopeUi();
+            notify('success', '已取消当前聊天的临时头像，恢复为永久头像。');
+        } catch (error) {
+            console.error('[丘丘头像工作台] 取消本次聊天覆盖失败', error);
+            notify('error', error.message || '取消本次聊天覆盖失败。');
+        }
     }
 
     function openWorkbench(target) {
@@ -680,12 +993,15 @@
         state.file = null;
         state.sourceKind = 'current';
         state.aspect = { ...DEFAULT_ASPECT };
+        state.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
         modal.classList.remove('qqaw-hidden');
         document.body.classList.add('qqaw-modal-open');
+        requestAnimationFrame(() => applyModalRect(settings.modalRect, false));
         modal.querySelector('#qqaw-icon-url').value = settings.iconUrl || DEFAULT_ICON_URL;
         modal.querySelector('#qqaw-launcher-gap').value = settings.launcherGap ?? 2;
         modal.querySelector('#qqaw-gap-value').value = `${settings.launcherGap ?? 2} px`;
         syncTargetUi();
+        syncReplaceScopeUi();
         const shell = modal.querySelector('#qqaw-preview-shell');
         shell.style.setProperty('--qqaw-aspect-w', 2);
         shell.style.setProperty('--qqaw-aspect-h', 3);
@@ -713,9 +1029,9 @@
             button.classList.toggle('active', button.dataset.kind === target?.kind);
         });
         const replaceButton = modal.querySelector('#qqaw-replace-avatar');
-        const canReplace = Boolean(target?.key) && (target.kind === 'user' || target.charId != null);
+        const canReplace = Boolean(target?.key) && (state.replaceScope === 'chat' || target.kind === 'user' || target.charId != null);
         replaceButton.disabled = !canReplace;
-        replaceButton.title = canReplace ? '' : '没有识别到可编辑的 Character / Persona，无法覆盖头像。';
+        replaceButton.title = canReplace ? '' : '永久替换需要识别到可编辑的 Character / Persona。';
     }
 
     function switchTarget(kind) {
@@ -740,7 +1056,185 @@
         return `${url}${separator}qqaw=${Date.now()}`;
     }
 
+    function liveContext() {
+        return globalThis.SillyTavern?.getContext?.() ?? context;
+    }
+
+    function hashString(value) {
+        let hash = 2166136261;
+        const text = String(value ?? '');
+        for (let i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(36);
+    }
+
+    function getCurrentChatIdentity() {
+        const ctx = liveContext();
+        return String(ctx.getCurrentChatId?.() || ctx.chatId || ctx.chatMetadata?.integrity || 'chat');
+    }
+
+    function overrideKeyForTarget(target) {
+        if (!target) return '';
+        const stable = target.kind === 'char'
+            ? (target.character?.avatar || target.key || target.name)
+            : (target.key || target.name);
+        return `${target.kind}:${stable}`;
+    }
+
+    function getChatOverrideStore(create = false) {
+        const ctx = liveContext();
+        const metadata = ctx.chatMetadata;
+        if (!metadata) return null;
+        if (!metadata[CHAT_METADATA_FIELD] && create) metadata[CHAT_METADATA_FIELD] = { version: 1, overrides: {} };
+        const store = metadata[CHAT_METADATA_FIELD];
+        if (store && !store.overrides && create) store.overrides = {};
+        return store || null;
+    }
+
+    function allChatOverrides() {
+        return Object.values(getChatOverrideStore(false)?.overrides ?? {});
+    }
+
+    function getChatOverrideForTarget(target) {
+        if (!target) return null;
+        const overrides = getChatOverrideStore(false)?.overrides ?? {};
+        const exact = overrides[overrideKeyForTarget(target)];
+        if (exact) return exact;
+        return Object.values(overrides).find((item) => {
+            if (!item || item.kind !== target.kind) return false;
+            if (item.targetKey && target.key && item.targetKey === target.key) return true;
+            if (target.kind === 'char' && item.charId != null && target.charId != null && Number(item.charId) === Number(target.charId)) return true;
+            return Boolean(item.targetName && target.name && item.targetName === target.name);
+        }) || null;
+    }
+
+    function chatOverrideUrl(override) {
+        if (!override?.file) return '';
+        const base = `/User%20Avatars/${encodeURIComponent(override.file)}`;
+        return `${base}?qqawchat=${encodeURIComponent(override.createdAt || Date.now())}`;
+    }
+
+    async function persistChatMetadata() {
+        const ctx = liveContext();
+        if (typeof ctx.saveMetadataDebounced === 'function') {
+            await ctx.saveMetadataDebounced();
+            return;
+        }
+        if (typeof ctx.saveChat === 'function') await ctx.saveChat();
+    }
+
+    async function setChatOverride(target, file) {
+        const store = getChatOverrideStore(true);
+        if (!store) throw new Error('当前聊天 metadata 不可用，无法保存“仅本次聊天”头像。');
+        const key = overrideKeyForTarget(target);
+        const record = {
+            kind: target.kind,
+            targetKey: target.key || '',
+            targetName: target.name || '',
+            charId: target.charId,
+            file,
+            createdAt: Date.now(),
+        };
+        store.overrides[key] = record;
+        await persistChatMetadata();
+        return record;
+    }
+
+    async function clearChatOverride(target) {
+        const store = getChatOverrideStore(false);
+        if (!store?.overrides) return;
+        let changed = false;
+        for (const [key, item] of Object.entries(store.overrides)) {
+            if (!item || item.kind !== target.kind) continue;
+            const matches = key === overrideKeyForTarget(target)
+                || (item.targetKey && target.key && item.targetKey === target.key)
+                || (target.kind === 'char' && item.charId != null && target.charId != null && Number(item.charId) === Number(target.charId))
+                || (item.targetName && target.name && item.targetName === target.name);
+            if (matches) {
+                delete store.overrides[key];
+                changed = true;
+            }
+        }
+        if (changed) await persistChatMetadata();
+    }
+
+    function findChatOverrideForMessage(message) {
+        if (!message) return null;
+        const isUser = message.getAttribute('is_user') === 'true';
+        const kind = isUser ? 'user' : 'char';
+        const name = message.querySelector('.name_text')?.textContent?.trim() || '';
+        const parsed = parseAvatarRef(message.querySelector('.avatar img')?.src);
+        const overrides = allChatOverrides();
+        return overrides.find((item) => {
+            if (!item || item.kind !== kind) return false;
+            if (message.dataset.qqawOriginalKey && item.targetKey === message.dataset.qqawOriginalKey) return true;
+            if (parsed?.file && !parsed.file.startsWith('__qqaw_chat_')) {
+                return Boolean(item.targetKey && parsed.file === item.targetKey);
+            }
+            return Boolean(item.targetName && name && item.targetName === name);
+        }) || null;
+    }
+
+    function applyChatOverrideToMessage(message) {
+        const override = findChatOverrideForMessage(message);
+        if (!override) return false;
+        message.dataset.qqawOriginalKind = override.kind;
+        message.dataset.qqawOriginalKey = override.targetKey || '';
+        message.dataset.qqawOriginalName = override.targetName || '';
+        message.dataset.qqawOriginalCharId = override.charId == null ? '' : String(override.charId);
+        const fresh = chatOverrideUrl(override);
+        message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, fresh));
+        return true;
+    }
+
+    function applyChatScopedOverrides(root = document) {
+        const messages = root.matches?.('.mes') ? [root] : [...root.querySelectorAll?.('#chat .mes, .mes') ?? []];
+        messages.forEach((message) => {
+            if (message.classList.contains('template_element') || message.id === 'message_template') return;
+            applyChatOverrideToMessage(message);
+        });
+    }
+
+    function refreshChatScopedOverride(target) {
+        const override = getChatOverrideForTarget(target);
+        if (!override) return;
+        document.querySelectorAll('#chat .mes:not(.template_element)').forEach((message) => {
+            const candidate = getTargetFromMessage(message);
+            const same = candidate?.kind === target.kind && (
+                (candidate.key && target.key && candidate.key === target.key)
+                || (candidate.name && target.name && candidate.name === target.name)
+                || (target.kind === 'char' && candidate.charId != null && target.charId != null && candidate.charId === target.charId)
+            );
+            if (same) applyChatOverrideToMessage(message);
+        });
+    }
+
+    async function uploadChatScopedAvatar(target, blob) {
+        const chatIdentity = getCurrentChatIdentity();
+        const suffix = hashString(`${target.kind}|${target.key}|${target.name}`);
+        const file = `__qqaw_chat_${hashString(chatIdentity)}_${suffix}.png`;
+        const formData = new FormData();
+        formData.append('avatar', new File([blob], 'qiuqiu-chat-avatar.png', { type: 'image/png' }));
+        formData.append('overwrite_name', file);
+        const response = await fetch('/api/avatars/upload', {
+            method: 'POST',
+            headers: liveContext().getRequestHeaders?.({ omitContentType: true }) ?? {},
+            body: formData,
+            cache: 'no-cache',
+        });
+        if (!response.ok) throw new Error(`本次聊天头像上传失败（HTTP ${response.status}）。`);
+        const record = await setChatOverride(target, file);
+        refreshChatScopedOverride(target);
+        setTimeout(() => refreshChatScopedOverride(target), 80);
+        setTimeout(() => refreshChatScopedOverride(target), 300);
+        return record;
+    }
+
     function getFullAvatarUrl(target) {
+        const override = getChatOverrideForTarget(target);
+        if (override) return chatOverrideUrl(override);
         if (!target?.key) return withCacheBust(target?.sourceUrl || '');
         if (target.kind === 'user') {
             return withCacheBust(`/User%20Avatars/${encodeURIComponent(target.key)}`);
@@ -1031,21 +1525,26 @@
             notify('warning', '没有识别到要替换的头像。');
             return;
         }
-        if (state.target.kind === 'char' && state.target.charId == null) {
-            notify('warning', '没有识别到对应 Character。请从该角色的一条消息姓名后重新打开工作台。');
+        if (state.replaceScope === 'permanent' && state.target.kind === 'char' && state.target.charId == null) {
+            notify('warning', '永久替换需要识别到对应 Character。请从该角色的一条消息姓名后重新打开工作台。');
             return;
         }
 
         const button = modal.querySelector('#qqaw-replace-avatar');
-        const oldText = button.textContent;
         button.disabled = true;
-        button.textContent = '正在替换…';
+        button.textContent = state.replaceScope === 'chat' ? '正在应用到本次聊天…' : '正在永久替换…';
         try {
             const blob = await renderCropBlob();
-            if (state.target.kind === 'user') {
-                await uploadPersonaAvatar(state.target, blob);
+            if (state.replaceScope === 'chat') {
+                await uploadChatScopedAvatar(state.target, blob);
             } else {
-                await uploadCharacterAvatar(state.target, blob);
+                // 如果这个聊天之前启用了临时头像，永久替换时先清掉临时覆盖，避免它继续遮住新头像。
+                await clearChatOverride(state.target);
+                if (state.target.kind === 'user') {
+                    await uploadPersonaAvatar(state.target, blob);
+                } else {
+                    await uploadCharacterAvatar(state.target, blob);
+                }
             }
 
             state.layout = { ...DEFAULT_LAYOUT };
@@ -1054,16 +1553,22 @@
             state.sourceKind = 'current';
             revokeObjectUrl();
             await loadTargetImage(true);
+            applyChatScopedOverrides(document);
             refreshAllAvatarLayouts(document);
             updatePreview();
-            notify('success', `${state.target.name || '头像'} 已裁剪并替换。`);
+            notify(
+                'success',
+                state.replaceScope === 'chat'
+                    ? `${state.target.name || '头像'} 已只在当前聊天中替换。`
+                    : `${state.target.name || '头像'} 已永久替换。`,
+            );
         } catch (error) {
             console.error('[丘丘头像工作台] 替换头像失败', error);
             notify('error', error.message || '替换头像失败。');
         } finally {
             button.disabled = false;
-            button.textContent = oldText;
             syncTargetUi();
+            syncReplaceScopeUi();
         }
     }
 
@@ -1320,7 +1825,7 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.3 已加载');
+            console.info('[丘丘头像工作台] v0.1.4 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.1.3 */
+/* 丘丘头像工作台 v0.1.4 */
 
 .qqaw-name-button {
     appearance: none;
@@ -75,13 +75,8 @@
     position: fixed;
     inset: 0;
     z-index: 2147483000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-    background: rgb(0 0 0 / 48%);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    pointer-events: none;
+    background: transparent;
 }
 
 #qqaw-overlay.qqaw-hidden {
@@ -89,13 +84,22 @@
 }
 
 body.qqaw-modal-open {
-    overflow: hidden;
+    /* 浮动工作台不锁定聊天滚动，方便边看头像框边调整。 */
 }
 
 #qqaw-modal {
-    width: min(920px, 96vw);
-    max-height: min(880px, 92dvh);
-    overflow: auto;
+    position: fixed;
+    left: 4vw;
+    top: 6dvh;
+    width: min(820px, 92vw);
+    height: min(760px, 86dvh);
+    min-width: 280px;
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    pointer-events: auto;
+    container-type: inline-size;
     color: var(--SmartThemeBodyColor, #222);
     background: var(--SmartThemeBlurTintColor, rgb(255 255 255 / 96%));
     border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
@@ -104,8 +108,7 @@ body.qqaw-modal-open {
 }
 
 .qqaw-header {
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 3;
     display: flex;
     align-items: center;
@@ -116,6 +119,9 @@ body.qqaw-modal-open {
     border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    cursor: move;
+    touch-action: none;
+    user-select: none;
 }
 
 .qqaw-title-wrap {
@@ -157,7 +163,27 @@ body.qqaw-modal-open {
     cursor: pointer;
 }
 
+.qqaw-window-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.qqaw-window-actions .qqaw-icon-button {
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+#qqaw-reset-window {
+    font-size: 18px;
+}
+
 .qqaw-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
     padding: 16px 18px 20px;
 }
 
@@ -411,40 +437,106 @@ body.qqaw-modal-open {
     width: 100%;
 }
 
-@media (max-width: 720px) {
-    #qqaw-overlay {
-        align-items: flex-end;
-        padding: 0;
-    }
 
-    #qqaw-modal {
-        width: 100vw;
-        max-height: 94dvh;
-        border-radius: 18px 18px 0 0;
-        border-left: 0;
-        border-right: 0;
-        border-bottom: 0;
-    }
+.qqaw-scope-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 4px;
+}
 
-    .qqaw-body {
-        padding-inline: 14px;
-        padding-bottom: calc(18px + env(safe-area-inset-bottom));
-    }
+.qqaw-scope-button {
+    appearance: none;
+    min-height: 36px;
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, currentColor 4%, transparent);
+    color: inherit;
+    cursor: pointer;
+}
 
+.qqaw-scope-button.active {
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #fdacbf) 28%, transparent);
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor, #fdacbf) 62%, transparent);
+    font-weight: 700;
+}
+
+.qqaw-resize-handle {
+    position: absolute;
+    z-index: 20;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.qqaw-resize-n,
+.qqaw-resize-s {
+    left: 16px;
+    right: 16px;
+    height: 10px;
+    cursor: ns-resize;
+}
+
+.qqaw-resize-n { top: -2px; }
+.qqaw-resize-s { bottom: -2px; }
+
+.qqaw-resize-e,
+.qqaw-resize-w {
+    top: 16px;
+    bottom: 16px;
+    width: 10px;
+    cursor: ew-resize;
+}
+
+.qqaw-resize-e { right: -2px; }
+.qqaw-resize-w { left: -2px; }
+
+.qqaw-resize-ne,
+.qqaw-resize-se,
+.qqaw-resize-sw,
+.qqaw-resize-nw {
+    width: 22px;
+    height: 22px;
+}
+
+.qqaw-resize-ne { top: -3px; right: -3px; cursor: nesw-resize; }
+.qqaw-resize-se { right: -3px; bottom: -3px; cursor: nwse-resize; }
+.qqaw-resize-sw { left: -3px; bottom: -3px; cursor: nesw-resize; }
+.qqaw-resize-nw { left: -3px; top: -3px; cursor: nwse-resize; }
+
+.qqaw-resize-se::after {
+    content: '';
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    width: 10px;
+    height: 10px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    opacity: .35;
+}
+
+@container (max-width: 700px) {
     .qqaw-main-grid {
         grid-template-columns: 1fr;
-        gap: 20px;
+        gap: 18px;
     }
 
     .qqaw-preview-shell {
-        width: min(68vw, 300px);
-        max-height: 46dvh;
+        width: min(68cqw, 300px);
+    }
+}
+
+@media (max-width: 720px) {
+    .qqaw-body {
+        padding-inline: 12px;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
     }
 
     #qqaw-target-file {
-        max-width: 44vw;
+        max-width: 42vw;
     }
 }
+
 
 
 /* 设置页备用入口：用于某些主题/Tauri WebView 拦截消息区点击时兜底。 */
@@ -475,4 +567,15 @@ body.qqaw-modal-open {
 .qqaw-settings-launcher small {
     flex-basis: 100%;
     opacity: .65;
+}
+
+.qqaw-clear-chat-avatar {
+    width: 100%;
+    margin: 8px 0 2px;
+    opacity: .88;
+}
+
+/* “仅本次聊天”使用内部临时头像文件，不让它们挤进 Persona 头像列表。 */
+#user_avatar_block [imgfile^="__qqaw_chat_"] {
+    display: none !important;
 }
