@@ -52,6 +52,7 @@
             personaLayouts: {},
             characterLayouts: {},
             preferredAspect: '2:3',
+            launcherGap: 2,
         };
     }
 
@@ -60,6 +61,7 @@
         settings = Object.assign(getDefaults(), current);
         settings.personaLayouts ??= {};
         settings.characterLayouts ??= {};
+        settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -8, 40);
         context.extensionSettings[MODULE_ID] = settings;
     }
 
@@ -318,6 +320,16 @@
         return null;
     }
 
+    function getLauncherHost(_name, message) {
+        if (!message) return null;
+        // 入口直接挂在对应 .mes 上：这样滚动时它和该消息是同一个坐标系，
+        // 不会像 position:fixed 那样留在屏幕上，也不会受姓名父容器 overflow 裁切。
+        if (getComputedStyle(message).position === 'static') {
+            message.classList.add('qqaw-launcher-host');
+        }
+        return message;
+    }
+
     function removeLauncher(message, button) {
         button?.remove();
         launcherMap.delete(message);
@@ -336,23 +348,27 @@
             return;
         }
 
-        const rect = name.getBoundingClientRect();
-        const style = getComputedStyle(name);
-        const fontSize = Number.parseFloat(style.fontSize) || 16;
-        const measuredHeight = rect.height > 0 ? rect.height : fontSize;
-        // 姓名有 transform / 自定义字号时，以实际视觉高度为准；避免异常主题把图标撑得过大。
-        const size = clamp(measuredHeight, 8, 48);
-        const gap = clamp(size * 0.18, 2, 8);
-        const left = rect.right + gap;
-        const top = rect.top + (rect.height - size) / 2;
-
-        // 姓名已经滚出聊天窗口时，不让悬浮入口残留在屏幕上。
-        const viewportW = globalThis.visualViewport?.width || window.innerWidth;
-        const viewportH = globalThis.visualViewport?.height || window.innerHeight;
-        if (rect.bottom < 0 || rect.top > viewportH || left < 0 || left > viewportW) {
+        const host = getLauncherHost(name, message);
+        if (!host?.isConnected) {
             button.hidden = true;
             return;
         }
+        if (button.parentElement !== host) host.append(button);
+        button.__qqawHost = host;
+
+        const nameRect = name.getBoundingClientRect();
+        const hostRect = host.getBoundingClientRect();
+        const style = getComputedStyle(name);
+        const fontSize = Number.parseFloat(style.fontSize) || 16;
+        const measuredHeight = nameRect.height > 0 ? nameRect.height : fontSize;
+        const size = clamp(measuredHeight, 8, 48);
+        const gap = clamp(Number(settings.launcherGap ?? 2), -8, 40);
+
+        // 这里使用“姓名坐标 - 宿主坐标”，得到宿主内部坐标。
+        // 因为按钮是 absolute 且挂在消息内部，它会天然随着这条消息滚动，
+        // 不再需要用 fixed 元素追踪滚动位置。
+        const left = nameRect.right - hostRect.left + host.scrollLeft + gap;
+        const top = nameRect.top - hostRect.top + host.scrollTop + (nameRect.height - size) / 2;
 
         button.hidden = false;
         button.style.setProperty('--qqaw-name-size', `${size}px`);
@@ -380,7 +396,7 @@
             return;
         }
 
-        const name = message.querySelector('.name_text') || message.querySelector('.ch_name');
+        const name = getNameAnchor(message);
         if (!name) return;
 
         const button = document.createElement('button');
@@ -395,16 +411,15 @@
         img.alt = '';
         button.append(img);
 
-        // 不再把按钮插进 .ch_name 的文档流。很多美化会把 .name_text 绝对定位，
-        // 这会导致“姓名在顶部、按钮却掉到正文前面”。现在按钮挂到 body，
-        // 再按姓名的实际屏幕坐标贴在姓名右侧，因此能跟随绝对定位 / transform 的姓名。
         button.__qqawMessage = message;
-        document.body.append(button);
+        const host = getLauncherHost(name, message);
+        host.append(button);
+        button.__qqawHost = host;
         launcherMap.set(message, button);
         message.dataset.qqawLauncherAttached = '1';
         scheduleLauncherPositions();
 
-        // 某些主题会在消息渲染后再做一次布局，延迟校准几次。
+        // 某些美化会在消息渲染后再做一次布局，延迟校准几次。
         setTimeout(scheduleLauncherPositions, 50);
         setTimeout(scheduleLauncherPositions, 300);
         setTimeout(scheduleLauncherPositions, 1000);
@@ -447,11 +462,9 @@
         if (globalLauncherBound) return;
         globalLauncherBound = true;
         window.addEventListener('click', handleGlobalLauncherClick, true);
-        // 使用捕获阶段监听所有可滚动容器；Tauri 美化常常不是 window 自己在滚动。
-        window.addEventListener('scroll', scheduleLauncherPositions, true);
+        // 入口现在锚定在每条消息内部，不再跟随滚动重算；只在布局尺寸变化时重新定位。
         window.addEventListener('resize', scheduleLauncherPositions, { passive: true });
         window.addEventListener('orientationchange', scheduleLauncherPositions, { passive: true });
-        globalThis.visualViewport?.addEventListener?.('scroll', scheduleLauncherPositions, { passive: true });
         globalThis.visualViewport?.addEventListener?.('resize', scheduleLauncherPositions, { passive: true });
     }
 
@@ -533,7 +546,8 @@
                     <div class="qqaw-main-grid">
                         <section class="qqaw-preview-panel">
                             <div id="qqaw-preview-shell" class="qqaw-preview-shell" style="--qqaw-aspect-w:2;--qqaw-aspect-h:3;">
-                                <img id="qqaw-preview-img" alt="头像预览" draggable="false" />
+                                <canvas id="qqaw-preview-canvas" aria-label="头像裁剪预览"></canvas>
+                                <img id="qqaw-preview-img" alt="" draggable="false" hidden />
                                 <div class="qqaw-preview-hint">拖动调整位置 · 滚轮/双指缩放</div>
                             </div>
                             <div class="qqaw-upload-row">
@@ -545,13 +559,9 @@
 
                         <section class="qqaw-controls-panel">
                             <div class="qqaw-control-block">
-                                <div class="qqaw-control-title">裁剪比例</div>
-                                <div class="qqaw-chip-row" id="qqaw-aspect-row">
-                                    <button type="button" data-ratio="2:3" class="qqaw-chip active">2:3</button>
-                                    <button type="button" data-ratio="1:1" class="qqaw-chip">1:1</button>
-                                    <button type="button" data-ratio="3:4" class="qqaw-chip">3:4</button>
-                                    <button type="button" data-ratio="4:5" class="qqaw-chip">4:5</button>
-                                </div>
+                                <div class="qqaw-control-title">裁剪输出</div>
+                                <div class="qqaw-fixed-ratio">2:3 · 512 × 768 · 只裁切，不拉伸原图</div>
+                                <div id="qqaw-pan-note" class="qqaw-small-note"></div>
                             </div>
 
                             <label class="qqaw-slider-row">
@@ -576,7 +586,7 @@
                             <div class="qqaw-divider"></div>
 
                             <button type="button" id="qqaw-replace-avatar" class="menu_button qqaw-dangerous">裁剪并替换头像</button>
-                            <div class="qqaw-small-note">此操作会按上方预览真正生成一张新 PNG，并覆盖当前 Persona / Character 头像。</div>
+                            <div class="qqaw-small-note">替换时固定输出 512×768（2:3）。图片只会被等比例裁切和缩放，不会横向或纵向拉伸。</div>
                         </section>
                     </div>
 
@@ -593,7 +603,11 @@
                                 <input id="qqaw-icon-file" type="file" accept="image/*,.gif" hidden />
                                 <button type="button" id="qqaw-reset-icon" class="menu_button">恢复默认</button>
                             </div>
-                            <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。图标会显示在消息姓名后面，并与姓名等高。</div>
+                            <label class="qqaw-slider-row qqaw-gap-control">
+                                <span>图标到姓名距离 <output id="qqaw-gap-value">2 px</output></span>
+                                <input id="qqaw-launcher-gap" type="range" min="-8" max="40" step="1" value="2" />
+                            </label>
+                            <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。负数会让图标更贴近姓名；入口固定在每条消息内部，会随该消息一起滚动。</div>
                         </div>
                     </details>
                 </div>
@@ -640,10 +654,6 @@
         $('#qqaw-save-layout').addEventListener('click', saveCurrentDisplayLayout);
         $('#qqaw-replace-avatar').addEventListener('click', replaceAvatar);
 
-        modal.querySelectorAll('#qqaw-aspect-row [data-ratio]').forEach((button) => {
-            button.addEventListener('click', () => setAspect(button.dataset.ratio));
-        });
-
         const shell = $('#qqaw-preview-shell');
         shell.addEventListener('pointerdown', beginDrag);
         shell.addEventListener('pointermove', dragPreview);
@@ -655,24 +665,12 @@
         $('#qqaw-pick-icon').addEventListener('click', () => $('#qqaw-icon-file').click());
         $('#qqaw-icon-file').addEventListener('change', applyLocalIcon);
         $('#qqaw-reset-icon').addEventListener('click', resetWorkbenchIcon);
-    }
-
-    function setAspect(ratio) {
-        const map = {
-            '2:3': { w: 2, h: 3, label: '2:3' },
-            '1:1': { w: 1, h: 1, label: '1:1' },
-            '3:4': { w: 3, h: 4, label: '3:4' },
-            '4:5': { w: 4, h: 5, label: '4:5' },
-        };
-        state.aspect = map[ratio] ?? { ...DEFAULT_ASPECT };
-        settings.preferredAspect = state.aspect.label;
-        saveSettings();
-        modal.querySelectorAll('#qqaw-aspect-row [data-ratio]').forEach((button) => {
-            button.classList.toggle('active', button.dataset.ratio === state.aspect.label);
+        $('#qqaw-launcher-gap').addEventListener('input', () => {
+            settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -8, 40);
+            $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
+            saveSettings();
+            scheduleLauncherPositions();
         });
-        const shell = modal.querySelector('#qqaw-preview-shell');
-        shell.style.setProperty('--qqaw-aspect-w', state.aspect.w);
-        shell.style.setProperty('--qqaw-aspect-h', state.aspect.h);
     }
 
     function openWorkbench(target) {
@@ -681,12 +679,16 @@
         state.layout = getSavedLayout(target);
         state.file = null;
         state.sourceKind = 'current';
-        state.aspect = parseAspect(settings.preferredAspect || '2:3');
+        state.aspect = { ...DEFAULT_ASPECT };
         modal.classList.remove('qqaw-hidden');
         document.body.classList.add('qqaw-modal-open');
         modal.querySelector('#qqaw-icon-url').value = settings.iconUrl || DEFAULT_ICON_URL;
+        modal.querySelector('#qqaw-launcher-gap').value = settings.launcherGap ?? 2;
+        modal.querySelector('#qqaw-gap-value').value = `${settings.launcherGap ?? 2} px`;
         syncTargetUi();
-        setAspect(state.aspect.label);
+        const shell = modal.querySelector('#qqaw-preview-shell');
+        shell.style.setProperty('--qqaw-aspect-w', 2);
+        shell.style.setProperty('--qqaw-aspect-h', 3);
         updatePreview();
         loadTargetImage(true);
     }
@@ -701,12 +703,6 @@
         state.pointers.clear();
         state.pinchStart = null;
         state.dragging = false;
-    }
-
-    function parseAspect(value) {
-        const [w, h] = String(value).split(':').map(Number);
-        if (!w || !h) return { ...DEFAULT_ASPECT };
-        return { w, h, label: `${w}:${h}` };
     }
 
     function syncTargetUi() {
@@ -785,6 +781,7 @@
             }
             state.loadedImage = image;
             preview.src = state.sourceUrl;
+            updatePreview();
         } catch (error) {
             console.error(error);
             notify('error', '当前头像加载失败。你仍然可以选择一张新图片。');
@@ -823,26 +820,68 @@
         }
     }
 
+    function renderPreviewCanvas() {
+        const canvas = modal?.querySelector('#qqaw-preview-canvas');
+        if (!canvas) return;
+        const image = state.loadedImage;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const backingWidth = 600;
+        const backingHeight = 900;
+        if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+            canvas.width = backingWidth;
+            canvas.height = backingHeight;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!image?.naturalWidth || !image?.naturalHeight) return;
+
+        const crop = computeCropRect(
+            image.naturalWidth,
+            image.naturalHeight,
+            2 / 3,
+            state.layout,
+        );
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(
+            image,
+            crop.left,
+            crop.top,
+            crop.width,
+            crop.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+        );
+    }
+
+    function updatePanNote() {
+        const note = modal?.querySelector('#qqaw-pan-note');
+        if (!note) return;
+        const image = state.loadedImage;
+        if (!image?.naturalWidth || !image?.naturalHeight) {
+            note.textContent = '';
+            return;
+        }
+        const crop = computeCropRect(image.naturalWidth, image.naturalHeight, 2 / 3, state.layout);
+        const horizontalRoom = Math.max(0, image.naturalWidth - crop.width);
+        const verticalRoom = Math.max(0, image.naturalHeight - crop.height);
+        if (horizontalRoom < 1) {
+            note.textContent = '当前缩放下没有横向裁剪余量；把“缩放”稍微调大后，就可以左右移动。';
+        } else if (verticalRoom < 1) {
+            note.textContent = '当前缩放下没有纵向裁剪余量；把“缩放”稍微调大后，就可以上下移动。';
+        } else {
+            note.textContent = '水平、垂直位置都会直接改变最终裁剪区域。';
+        }
+    }
+
     function updatePreview() {
         if (!modal) return;
         state.layout = normalizeLayout(state.layout);
-        const img = modal.querySelector('#qqaw-preview-img');
-        img.style.setProperty('--qqaw-x', `${state.layout.x}%`);
-        img.style.setProperty('--qqaw-y', `${state.layout.y}%`);
-        img.style.setProperty('--qqaw-zoom', String(state.layout.zoom));
-
-        if (supportsObjectViewBox() && state.loadedImage?.naturalWidth && state.loadedImage?.naturalHeight) {
-            const crop = computeCropRect(
-                state.loadedImage.naturalWidth,
-                state.loadedImage.naturalHeight,
-                state.aspect.w / state.aspect.h,
-                state.layout,
-            );
-            const value = `xywh(${crop.left.toFixed(3)}px ${crop.top.toFixed(3)}px ${crop.width.toFixed(3)}px ${crop.height.toFixed(3)}px)`;
-            img.style.setProperty('object-view-box', value);
-        } else {
-            img.style.removeProperty('object-view-box');
-        }
+        renderPreviewCanvas();
+        updatePanNote();
 
         const zoom = modal.querySelector('#qqaw-zoom');
         const x = modal.querySelector('#qqaw-x');
@@ -951,23 +990,18 @@
         }
     }
 
-    function outputSizeForAspect(aspect) {
-        if (aspect.w === 2 && aspect.h === 3) return { width: 512, height: 768 };
-        const longSide = 768;
-        if (aspect.w >= aspect.h) {
-            return { width: longSide, height: Math.round(longSide * aspect.h / aspect.w) };
-        }
-        return { width: Math.round(longSide * aspect.w / aspect.h), height: longSide };
-    }
-
     async function renderCropBlob() {
         const image = state.loadedImage;
         if (!image) throw new Error('还没有可裁剪的图片。');
 
-        const { width, height } = outputSizeForAspect(state.aspect);
+        // SillyTavern 在默认设置下会把头像规范到 512×768。
+        // 为避免上传 1:1 / 3:4 后再次被拉伸，这里始终直接生成标准 2:3 文件。
+        // drawImage 的源裁剪框同样严格保持 2:3，因此只发生裁切与等比缩放，不会改变人物比例。
+        const width = 512;
+        const height = 768;
         const naturalW = image.naturalWidth || image.width;
         const naturalH = image.naturalHeight || image.height;
-        const crop = computeCropRect(naturalW, naturalH, width / height, state.layout);
+        const crop = computeCropRect(naturalW, naturalH, 2 / 3, state.layout);
 
         const out = document.createElement('canvas');
         out.width = width;
@@ -1033,6 +1067,63 @@
         }
     }
 
+    function directAvatarUrl(target) {
+        if (!target?.key) return '';
+        return target.kind === 'user'
+            ? `/User%20Avatars/${encodeURIComponent(target.key)}`
+            : `/characters/${encodeURIComponent(target.key)}`;
+    }
+
+    function messageMatchesAvatarTarget(message, target) {
+        if (!message || !target) return false;
+        const candidate = getTargetFromMessage(message);
+        if (!candidate || candidate.kind !== target.kind) return false;
+        if (candidate.key && target.key && candidate.key === target.key) return true;
+        if (target.kind === 'char' && candidate.charId != null && target.charId != null && candidate.charId === target.charId) return true;
+        return Boolean(candidate.name && target.name && candidate.name === target.name);
+    }
+
+    function setFreshImageSource(img, src) {
+        if (!img || !src) return;
+        const picture = img.closest?.('picture');
+        picture?.querySelectorAll?.('source').forEach((source) => source.removeAttribute('srcset'));
+        img.removeAttribute('srcset');
+        img.src = src;
+        // 某些主题给 img 设置了 background-image，这里一并清掉旧缓存引用。
+        if (img.style.backgroundImage) img.style.removeProperty('background-image');
+    }
+
+    function refreshLiveAvatar(target) {
+        const fresh = withCacheBust(directAvatarUrl(target));
+        if (!fresh) return '';
+
+        // 优先按“每条消息实际对应的 Persona / Character”匹配，兼容群聊和历史 Persona。
+        document.querySelectorAll('#chat .mes:not(.template_element)').forEach((message) => {
+            if (!messageMatchesAvatarTarget(message, target)) return;
+            message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, fresh));
+        });
+
+        // 再兜底刷新其他 UI 中使用同一头像文件的 img（角色面板、Persona 面板等）。
+        document.querySelectorAll('.avatar img').forEach((img) => {
+            const parsed = parseAvatarRef(img.src);
+            if (!parsed?.file || parsed.file !== target.key) return;
+            const expectedType = target.kind === 'user' ? 'persona' : 'avatar';
+            if (parsed.type === expectedType) setFreshImageSource(img, fresh);
+        });
+
+        target.sourceUrl = fresh;
+        state.sourceUrl = fresh;
+        requestAnimationFrame(() => refreshAllAvatarLayouts(document));
+        return fresh;
+    }
+
+    function scheduleLiveAvatarRefresh(target) {
+        refreshLiveAvatar(target);
+        requestAnimationFrame(() => refreshLiveAvatar(target));
+        setTimeout(() => refreshLiveAvatar(target), 80);
+        setTimeout(() => refreshLiveAvatar(target), 300);
+    }
+
     async function uploadPersonaAvatar(target, blob) {
         const formData = new FormData();
         formData.append('avatar', new File([blob], 'qiuqiu-avatar.png', { type: 'image/png' }));
@@ -1048,16 +1139,10 @@
             throw new Error(`Persona 头像上传失败（HTTP ${response.status}）。`);
         }
 
-        const thumbBase = context.getThumbnailUrl?.('persona', target.key)
-            || `/thumbnail?type=persona&file=${encodeURIComponent(target.key)}`;
-        const thumb = withCacheBust(thumbBase);
-        document.querySelectorAll('.avatar img').forEach((img) => {
-            const parsed = parseAvatarRef(img.src);
-            if (parsed?.type === 'persona' && parsed.file === target.key) img.src = thumb;
-        });
-        target.sourceUrl = thumb;
-        state.sourceUrl = thumb;
+        scheduleLiveAvatarRefresh(target);
         await context.eventSource?.emit?.(context.eventTypes?.PERSONA_UPDATED, target.key);
+        // 事件处理器可能异步重绘旧缩略图，再补几次缓存破坏刷新。
+        scheduleLiveAvatarRefresh(target);
     }
 
     function valueOrEmpty(value) {
@@ -1134,18 +1219,12 @@
         target.key = updated.avatar || character.avatar;
         target.name = updated.name || updated.data?.name || target.name;
 
-        const thumbBase = context.getThumbnailUrl?.('avatar', target.key)
-            || `/thumbnail?type=avatar&file=${encodeURIComponent(target.key)}`;
-        const thumb = withCacheBust(thumbBase);
-        document.querySelectorAll('.avatar img').forEach((img) => {
-            const parsed = parseAvatarRef(img.src);
-            if (parsed?.type === 'avatar' && parsed.file === target.key) img.src = thumb;
-        });
-        target.sourceUrl = thumb;
-        state.sourceUrl = thumb;
+        scheduleLiveAvatarRefresh(target);
 
         const eventPayload = { detail: { id: String(target.charId), character: updated } };
         await context.eventSource?.emit?.(context.eventTypes?.CHARACTER_EDITED, eventPayload);
+        // Character edited 事件有时会异步触发旧缩略图重绘，再补几次强制刷新。
+        scheduleLiveAvatarRefresh(target);
     }
 
     function applyIconUrl() {
@@ -1241,7 +1320,7 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.2 已加载');
+            console.info('[丘丘头像工作台] v0.1.3 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
