@@ -1,0 +1,10 @@
+{
+  "display_name": "丘丘头像工作台",
+  "loading_order": 120,
+  "dependencies": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "丘丘",
+  "version": "0.1.0",
+  "auto_update": true
+}
