@@ -7,9 +7,11 @@
     const DEFAULT_ICON_URL = 'https://imgbed.heliar.top/i/hWLZsEjJm7_lklfn_IMG_1048.gif';
     const DEFAULT_LAYOUT = Object.freeze({ x: 50, y: 50, zoom: 1 });
     const DEFAULT_ASPECT = Object.freeze({ w: 2, h: 3, label: '2:3' });
+    const DEFAULT_BACKGROUND_LAYOUT = Object.freeze({ x: 50, y: 50, zoom: 1 });
     const HISTORY_DB_NAME = 'qiuqiu_avatar_workbench';
-    const HISTORY_DB_VERSION = 1;
+    const HISTORY_DB_VERSION = 2;
     const HISTORY_STORE = 'avatarHistory';
+    const BACKGROUND_STORE = 'backgroundAssets';
     const HISTORY_LIMIT = 8;
     const CHAT_STORE_VERSION = 3;
     const MESSAGE_ORIGINAL_FORCE_FIELD = 'qiuqiu_avatar_workbench_original_force_avatar';
@@ -29,6 +31,12 @@
     let userDisplayRevision = Date.now();
     let themePreviewFrame = 0;
     let themePreviewResizeObserver = null;
+    let backgroundResizeObserver = null;
+    let backgroundApplyFrame = 0;
+    let activeBackgroundObjectUrl = '';
+    let backgroundPreviewObjectUrl = '';
+    let backgroundImageCache = null;
+    let backgroundState = createBackgroundState();
     let state = createInitialState();
 
     function createInitialState() {
@@ -46,6 +54,27 @@
             pointers: new Map(),
             pinchStart: null,
             replaceScope: 'permanent',
+        };
+    }
+
+
+
+    function createBackgroundState() {
+        return {
+            file: null,
+            assetId: '',
+            assetName: '',
+            loadedImage: null,
+            objectUrl: '',
+            sourceBlob: null,
+            layout: { ...DEFAULT_BACKGROUND_LAYOUT },
+            scope: 'chat',
+            previewOrientation: 'portrait',
+            dragging: false,
+            dragStart: null,
+            pointers: new Map(),
+            pinchStart: null,
+            previewing: false,
         };
     }
 
@@ -71,6 +100,11 @@
             replaceScope: 'permanent',
             modalRect: null,
             previewLayout: 'vertical',
+            workbenchMode: 'avatar',
+            backgroundScope: 'chat',
+            backgroundPreviewOrientation: 'portrait',
+            backgroundPermanent: null,
+            backgroundThemes: {},
         };
     }
 
@@ -82,6 +116,11 @@
         settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
         settings.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
         settings.previewLayout = settings.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
+        settings.workbenchMode = settings.workbenchMode === 'background' ? 'background' : 'avatar';
+        settings.backgroundScope = ['chat', 'theme', 'permanent'].includes(settings.backgroundScope) ? settings.backgroundScope : 'chat';
+        settings.backgroundPreviewOrientation = settings.backgroundPreviewOrientation === 'landscape' ? 'landscape' : 'portrait';
+        settings.backgroundThemes ??= {};
+        settings.backgroundPermanent ??= null;
         context.extensionSettings[MODULE_ID] = settings;
     }
 
@@ -627,7 +666,7 @@
                         <img class="qqaw-title-icon" alt="" />
                         <div>
                             <div id="qqaw-title">丘丘头像工作台</div>
-                            <div id="qqaw-subtitle">快速更换 · 主题预览 · 收藏回滚</div>
+                            <div id="qqaw-subtitle">头像 · 背景 · 自由构图 · 收藏回滚</div>
                         </div>
                     </div>
                     <div class="qqaw-window-actions">
@@ -637,6 +676,12 @@
                 </header>
 
                 <div class="qqaw-body">
+                    <div class="qqaw-workbench-mode-row" role="tablist" aria-label="工作台模式">
+                        <button type="button" class="qqaw-workbench-mode-button" data-mode="avatar" role="tab">头像</button>
+                        <button type="button" class="qqaw-workbench-mode-button" data-mode="background" role="tab">背景</button>
+                    </div>
+
+                    <div id="qqaw-avatar-workspace">
                     <div class="qqaw-target-row">
                         <button type="button" class="qqaw-target-button" data-kind="user">USER</button>
                         <button type="button" class="qqaw-target-button" data-kind="char">CHAR</button>
@@ -750,6 +795,81 @@
                         </div>
                     </section>
 
+                    </div>
+
+                    <div id="qqaw-background-workspace" hidden>
+                        <div class="qqaw-background-summary">
+                            <div>
+                                <div class="qqaw-section-kicker">BACKGROUND STUDIO</div>
+                                <div class="qqaw-section-title">酒馆背景</div>
+                            </div>
+                            <div class="qqaw-background-summary-text">
+                                <span id="qqaw-bg-effective-scope">当前：沿用酒馆背景</span>
+                                <span id="qqaw-bg-theme-name">主题：—</span>
+                            </div>
+                        </div>
+
+                        <div class="qqaw-bg-main-grid">
+                            <section class="qqaw-preview-panel qqaw-bg-preview-panel">
+                                <div class="qqaw-preview-layout-toolbar">
+                                    <span class="qqaw-preview-layout-label">预览方向</span>
+                                    <div class="qqaw-preview-layout-switch" role="group" aria-label="背景预览方向">
+                                        <button type="button" class="qqaw-bg-orientation-button" data-bg-orientation="portrait">竖屏</button>
+                                        <button type="button" class="qqaw-bg-orientation-button" data-bg-orientation="landscape">横屏</button>
+                                    </div>
+                                </div>
+
+                                <div id="qqaw-bg-preview-shell" class="qqaw-bg-preview-shell qqaw-bg-preview-portrait">
+                                    <canvas id="qqaw-bg-preview-canvas" aria-label="背景显示范围预览"></canvas>
+                                    <div class="qqaw-bg-device-ui" aria-hidden="true">
+                                        <div class="qqaw-bg-device-top"></div>
+                                        <div class="qqaw-bg-device-chat"></div>
+                                        <div class="qqaw-bg-device-input"></div>
+                                    </div>
+                                    <div class="qqaw-preview-hint">拖动选择显示范围 · 滚轮/双指缩放</div>
+                                </div>
+                                <div class="qqaw-upload-row">
+                                    <button type="button" id="qqaw-bg-pick-image" class="menu_button">选择背景图</button>
+                                    <input id="qqaw-bg-file-input" type="file" accept="image/*" hidden />
+                                    <button type="button" id="qqaw-bg-load-current" class="menu_button">载入当前背景</button>
+                                </div>
+                                <div class="qqaw-small-note">调节时会在当前酒馆中实时“试穿”背景；关闭工作台或切回头像页而没有保存时，会恢复已经保存的背景。</div>
+                            </section>
+
+                            <section class="qqaw-controls-panel qqaw-bg-controls-panel">
+                                <div class="qqaw-control-title">背景显示范围</div>
+                                <div class="qqaw-fixed-ratio">保持原图比例 · cover 裁切 · 不拉伸</div>
+                                <div id="qqaw-bg-pan-note" class="qqaw-small-note"></div>
+
+                                <label class="qqaw-slider-row">
+                                    <span>缩放 <output id="qqaw-bg-zoom-value">1.00×</output></span>
+                                    <input id="qqaw-bg-zoom" type="range" min="1" max="3" step="0.01" value="1" />
+                                </label>
+                                <label class="qqaw-slider-row">
+                                    <span>水平位置 <output id="qqaw-bg-x-value">50%</output></span>
+                                    <input id="qqaw-bg-x" type="range" min="0" max="100" step="0.1" value="50" />
+                                </label>
+                                <label class="qqaw-slider-row">
+                                    <span>垂直位置 <output id="qqaw-bg-y-value">50%</output></span>
+                                    <input id="qqaw-bg-y" type="range" min="0" max="100" step="0.1" value="50" />
+                                </label>
+                                <button type="button" id="qqaw-bg-reset-layout" class="menu_button">恢复居中</button>
+
+                                <div class="qqaw-divider"></div>
+                                <div class="qqaw-control-title">应用范围</div>
+                                <div class="qqaw-bg-scope-row" role="group" aria-label="背景应用范围">
+                                    <button type="button" class="qqaw-bg-scope-button" data-bg-scope="chat">本次聊天</button>
+                                    <button type="button" class="qqaw-bg-scope-button" data-bg-scope="theme">当前美化</button>
+                                    <button type="button" class="qqaw-bg-scope-button" data-bg-scope="permanent">永久</button>
+                                </div>
+                                <div id="qqaw-bg-scope-note" class="qqaw-small-note"></div>
+                                <button type="button" id="qqaw-bg-save" class="menu_button qqaw-primary">应用背景</button>
+                                <button type="button" id="qqaw-bg-clear-scope" class="menu_button qqaw-bg-clear-button">清除此范围背景</button>
+                                <div class="qqaw-small-note">优先级：本次聊天 ＞ 当前美化 ＞ 永久 ＞ SillyTavern 原生背景。图片由丘丘工作台保存在本机，不会塞进 Persona 或角色数据。</div>
+                            </section>
+                        </div>
+                    </div>
+
                     <details class="qqaw-icon-settings">
                         <summary>工作台与入口设置</summary>
                         <div class="qqaw-icon-settings-grid">
@@ -810,6 +930,9 @@
         modal.querySelectorAll('.qqaw-target-button').forEach((button) => {
             button.addEventListener('click', () => switchTarget(button.dataset.kind));
         });
+        modal.querySelectorAll('.qqaw-workbench-mode-button').forEach((button) => {
+            button.addEventListener('click', () => switchWorkbenchMode(button.dataset.mode));
+        });
 
         $('#qqaw-pick-image').addEventListener('click', () => $('#qqaw-file-input').click());
         $('#qqaw-file-input').addEventListener('change', onAvatarFilePicked);
@@ -857,6 +980,51 @@
         shell.addEventListener('pointercancel', endDrag);
         shell.addEventListener('wheel', onPreviewWheel, { passive: false });
 
+        $('#qqaw-bg-pick-image').addEventListener('click', () => $('#qqaw-bg-file-input').click());
+        $('#qqaw-bg-file-input').addEventListener('change', onBackgroundFilePicked);
+        $('#qqaw-bg-load-current').addEventListener('click', () => loadBackgroundEditorFromEffective(true));
+        $('#qqaw-bg-zoom').addEventListener('input', () => {
+            backgroundState.layout.zoom = Number($('#qqaw-bg-zoom').value);
+            updateBackgroundPreview();
+        });
+        $('#qqaw-bg-x').addEventListener('input', () => {
+            backgroundState.layout.x = Number($('#qqaw-bg-x').value);
+            updateBackgroundPreview();
+        });
+        $('#qqaw-bg-y').addEventListener('input', () => {
+            backgroundState.layout.y = Number($('#qqaw-bg-y').value);
+            updateBackgroundPreview();
+        });
+        $('#qqaw-bg-reset-layout').addEventListener('click', () => {
+            backgroundState.layout = { ...DEFAULT_BACKGROUND_LAYOUT };
+            updateBackgroundPreview();
+        });
+        $('#qqaw-bg-save').addEventListener('click', saveBackgroundAssignment);
+        $('#qqaw-bg-clear-scope').addEventListener('click', clearBackgroundAssignmentForCurrentScope);
+        modal.querySelectorAll('.qqaw-bg-scope-button').forEach((button) => {
+            button.addEventListener('click', () => {
+                backgroundState.scope = ['chat', 'theme', 'permanent'].includes(button.dataset.bgScope) ? button.dataset.bgScope : 'chat';
+                settings.backgroundScope = backgroundState.scope;
+                saveSettings();
+                syncBackgroundScopeUi();
+            });
+        });
+        modal.querySelectorAll('.qqaw-bg-orientation-button').forEach((button) => {
+            button.addEventListener('click', () => {
+                backgroundState.previewOrientation = button.dataset.bgOrientation === 'landscape' ? 'landscape' : 'portrait';
+                settings.backgroundPreviewOrientation = backgroundState.previewOrientation;
+                saveSettings();
+                syncBackgroundOrientationUi();
+                updateBackgroundPreview();
+            });
+        });
+        const bgShell = $('#qqaw-bg-preview-shell');
+        bgShell.addEventListener('pointerdown', beginBackgroundDrag);
+        bgShell.addEventListener('pointermove', dragBackgroundPreview);
+        bgShell.addEventListener('pointerup', endBackgroundDrag);
+        bgShell.addEventListener('pointercancel', endBackgroundDrag);
+        bgShell.addEventListener('wheel', onBackgroundPreviewWheel, { passive: false });
+
         $('#qqaw-apply-icon').addEventListener('click', applyIconUrl);
         $('#qqaw-pick-icon').addEventListener('click', () => $('#qqaw-icon-file').click());
         $('#qqaw-icon-file').addEventListener('change', applyLocalIcon);
@@ -885,6 +1053,595 @@
             saveSettings();
             updateLauncherPositions();
         });
+    }
+
+
+    function normalizeBackgroundLayout(layout) {
+        return {
+            x: clamp(Number(layout?.x ?? 50), 0, 100),
+            y: clamp(Number(layout?.y ?? 50), 0, 100),
+            zoom: clamp(Number(layout?.zoom ?? 1), 1, 3),
+        };
+    }
+
+    function getCurrentThemeName() {
+        const ctx = liveContext();
+        const select = document.querySelector('#themes, #ui-preset-name, select[name="theme"]');
+        const selectedText = select?.selectedOptions?.[0]?.textContent?.trim();
+        const candidates = [
+            ctx?.powerUser?.theme,
+            ctx?.power_user?.theme,
+            globalThis.power_user?.theme,
+            select?.value,
+            selectedText,
+            document.body?.dataset?.theme,
+        ];
+        const value = candidates.find((item) => typeof item === 'string' && item.trim());
+        return String(value || '当前美化').trim();
+    }
+
+    function getChatBackgroundAssignment() {
+        return liveContext().chatMetadata?.[CHAT_METADATA_FIELD]?.background || null;
+    }
+
+    async function setChatBackgroundAssignment(assignment) {
+        const ctx = liveContext();
+        if (!ctx.chatMetadata) throw new Error('当前聊天 metadata 不可用。');
+        ctx.chatMetadata[CHAT_METADATA_FIELD] ??= { version: CHAT_STORE_VERSION, overrides: {} };
+        if (assignment) ctx.chatMetadata[CHAT_METADATA_FIELD].background = assignment;
+        else delete ctx.chatMetadata[CHAT_METADATA_FIELD].background;
+        await persistChatMetadata({ flush: true });
+    }
+
+    function getThemeBackgroundAssignment(themeName = getCurrentThemeName()) {
+        return settings.backgroundThemes?.[themeName] || null;
+    }
+
+    function resolveEffectiveBackgroundAssignment() {
+        const chat = getChatBackgroundAssignment();
+        if (chat?.assetId) return { ...chat, effectiveScope: 'chat' };
+        const themeName = getCurrentThemeName();
+        const theme = getThemeBackgroundAssignment(themeName);
+        if (theme?.assetId) return { ...theme, effectiveScope: 'theme', themeName };
+        if (settings.backgroundPermanent?.assetId) return { ...settings.backgroundPermanent, effectiveScope: 'permanent' };
+        return null;
+    }
+
+    async function backgroundAssetGet(id) {
+        if (!id) return null;
+        const db = await openHistoryDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(BACKGROUND_STORE, 'readonly');
+            const req = tx.objectStore(BACKGROUND_STORE).get(id);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error || new Error('读取背景图片失败。'));
+        });
+    }
+
+    async function backgroundAssetPut(blob, name, width, height, id = '') {
+        const db = await openHistoryDb();
+        const record = {
+            id: id || `bg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
+            blob,
+            name: name || '丘丘背景',
+            width: Number(width || 0),
+            height: Number(height || 0),
+            createdAt: Date.now(),
+        };
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(BACKGROUND_STORE, 'readwrite');
+            tx.objectStore(BACKGROUND_STORE).put(record);
+            tx.oncomplete = () => resolve(record);
+            tx.onerror = () => reject(tx.error || new Error('保存背景图片失败。'));
+        });
+    }
+
+    function revokeBackgroundEditorObjectUrl() {
+        if (backgroundState.objectUrl) {
+            URL.revokeObjectURL(backgroundState.objectUrl);
+            backgroundState.objectUrl = '';
+        }
+    }
+
+    function revokeActiveBackgroundObjectUrl() {
+        if (activeBackgroundObjectUrl) {
+            URL.revokeObjectURL(activeBackgroundObjectUrl);
+            activeBackgroundObjectUrl = '';
+        }
+    }
+
+    function ensureBackgroundStyleElement() {
+        let style = document.querySelector('#qqaw-background-style');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'qqaw-background-style';
+            document.head.append(style);
+        }
+        return style;
+    }
+
+    function backgroundViewportRect() {
+        const candidates = ['#bg_custom', '#bg1']
+            .map((selector) => document.querySelector(selector))
+            .filter(Boolean);
+        for (const element of candidates) {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            if (rect.width > 10 && rect.height > 10 && style.display !== 'none') return rect;
+        }
+        return {
+            width: Math.max(1, globalThis.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 1),
+            height: Math.max(1, globalThis.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 1),
+        };
+    }
+
+    function clearBackgroundVisualOverride() {
+        const style = document.querySelector('#qqaw-background-style');
+        if (style) style.textContent = '';
+    }
+
+    function renderBackgroundLayer(url, image, layout) {
+        if (!url || !image?.naturalWidth || !image?.naturalHeight) {
+            clearBackgroundVisualOverride();
+            return;
+        }
+        const rect = backgroundViewportRect();
+        const cw = Math.max(1, rect.width || 1);
+        const ch = Math.max(1, rect.height || 1);
+        const normalized = normalizeBackgroundLayout(layout);
+        const baseScale = Math.max(cw / image.naturalWidth, ch / image.naturalHeight);
+        const scale = baseScale * normalized.zoom;
+        const rw = Math.max(1, image.naturalWidth * scale);
+        const rh = Math.max(1, image.naturalHeight * scale);
+        const safeUrl = String(url).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const style = ensureBackgroundStyleElement();
+        style.textContent = `
+            #bg1, #bg_custom {
+                background-image: url("${safeUrl}") !important;
+                background-repeat: no-repeat !important;
+                background-size: ${rw}px ${rh}px !important;
+                background-position: ${normalized.x}% ${normalized.y}% !important;
+            }
+        `;
+    }
+
+    async function applyEffectiveBackground() {
+        if (backgroundState.previewing && settings.workbenchMode === 'background' && modal && !modal.classList.contains('qqaw-hidden')) return;
+        const assignment = resolveEffectiveBackgroundAssignment();
+        if (!assignment?.assetId) {
+            revokeActiveBackgroundObjectUrl();
+            clearBackgroundVisualOverride();
+            syncBackgroundSummaryUi();
+            return;
+        }
+        try {
+            const asset = await backgroundAssetGet(assignment.assetId);
+            if (!asset?.blob) throw new Error('背景文件不存在。');
+            revokeActiveBackgroundObjectUrl();
+            activeBackgroundObjectUrl = URL.createObjectURL(asset.blob);
+            const image = await loadImageElement(activeBackgroundObjectUrl);
+            backgroundImageCache = image;
+            renderBackgroundLayer(activeBackgroundObjectUrl, image, assignment.layout || DEFAULT_BACKGROUND_LAYOUT);
+            syncBackgroundSummaryUi();
+        } catch (error) {
+            console.warn('[丘丘头像工作台] 应用背景失败', error);
+            clearBackgroundVisualOverride();
+        }
+    }
+
+    function scheduleBackgroundApply() {
+        if (backgroundApplyFrame) cancelAnimationFrame(backgroundApplyFrame);
+        backgroundApplyFrame = requestAnimationFrame(() => {
+            backgroundApplyFrame = 0;
+            applyEffectiveBackground();
+        });
+    }
+
+    function currentBackgroundScopeLabel(scope) {
+        if (scope === 'chat') return '本次聊天';
+        if (scope === 'theme') return '当前美化';
+        if (scope === 'permanent') return '永久';
+        return '酒馆原生';
+    }
+
+    function syncBackgroundSummaryUi() {
+        if (!modal) return;
+        const themeName = getCurrentThemeName();
+        const effective = resolveEffectiveBackgroundAssignment();
+        const scopeEl = modal.querySelector('#qqaw-bg-effective-scope');
+        const themeEl = modal.querySelector('#qqaw-bg-theme-name');
+        if (scopeEl) scopeEl.textContent = effective ? `当前：${currentBackgroundScopeLabel(effective.effectiveScope)}` : '当前：沿用酒馆原生背景';
+        if (themeEl) themeEl.textContent = `主题：${themeName}`;
+    }
+
+    function syncBackgroundScopeUi() {
+        if (!modal) return;
+        backgroundState.scope = ['chat', 'theme', 'permanent'].includes(backgroundState.scope) ? backgroundState.scope : 'chat';
+        modal.querySelectorAll('.qqaw-bg-scope-button').forEach((button) => {
+            const active = button.dataset.bgScope === backgroundState.scope;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        const note = modal.querySelector('#qqaw-bg-scope-note');
+        if (note) {
+            if (backgroundState.scope === 'chat') note.textContent = '只在当前这一个聊天中使用；切换到其他聊天会恢复主题/永久背景。';
+            else if (backgroundState.scope === 'theme') note.textContent = `只在“${getCurrentThemeName()}”这个美化主题下使用，切换主题后自动恢复其他背景。`;
+            else note.textContent = '作为丘丘工作台的全局永久背景；没有聊天或主题专属背景时都会使用它。';
+        }
+        const clear = modal.querySelector('#qqaw-bg-clear-scope');
+        if (clear) {
+            const exists = backgroundState.scope === 'chat'
+                ? Boolean(getChatBackgroundAssignment()?.assetId)
+                : backgroundState.scope === 'theme'
+                    ? Boolean(getThemeBackgroundAssignment()?.assetId)
+                    : Boolean(settings.backgroundPermanent?.assetId);
+            clear.disabled = !exists;
+        }
+        syncBackgroundSummaryUi();
+    }
+
+    function syncBackgroundOrientationUi() {
+        if (!modal) return;
+        backgroundState.previewOrientation = backgroundState.previewOrientation === 'landscape' ? 'landscape' : 'portrait';
+        const shell = modal.querySelector('#qqaw-bg-preview-shell');
+        shell?.classList.toggle('qqaw-bg-preview-landscape', backgroundState.previewOrientation === 'landscape');
+        shell?.classList.toggle('qqaw-bg-preview-portrait', backgroundState.previewOrientation !== 'landscape');
+        modal.querySelectorAll('.qqaw-bg-orientation-button').forEach((button) => {
+            const active = button.dataset.bgOrientation === backgroundState.previewOrientation;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+    }
+
+    function backgroundPreviewSize() {
+        return backgroundState.previewOrientation === 'landscape'
+            ? { width: 960, height: 540 }
+            : { width: 540, height: 960 };
+    }
+
+    function backgroundRenderMetrics(image, width, height, layout = backgroundState.layout) {
+        if (!image?.naturalWidth || !image?.naturalHeight) return null;
+        const normalized = normalizeBackgroundLayout(layout);
+        const baseScale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+        const scale = baseScale * normalized.zoom;
+        const rw = image.naturalWidth * scale;
+        const rh = image.naturalHeight * scale;
+        return {
+            rw,
+            rh,
+            left: (width - rw) * (normalized.x / 100),
+            top: (height - rh) * (normalized.y / 100),
+            overflowX: Math.max(0, rw - width),
+            overflowY: Math.max(0, rh - height),
+        };
+    }
+
+    function renderBackgroundPreviewCanvas() {
+        const canvas = modal?.querySelector('#qqaw-bg-preview-canvas');
+        if (!canvas) return;
+        const { width, height } = backgroundPreviewSize();
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+        const ctx2 = canvas.getContext('2d');
+        if (!ctx2) return;
+        ctx2.clearRect(0, 0, width, height);
+        const image = backgroundState.loadedImage;
+        const metrics = backgroundRenderMetrics(image, width, height);
+        if (!metrics) return;
+        ctx2.imageSmoothingEnabled = true;
+        ctx2.imageSmoothingQuality = 'high';
+        try {
+            ctx2.drawImage(image, metrics.left, metrics.top, metrics.rw, metrics.rh);
+        } catch (error) {
+            console.debug('[丘丘头像工作台] 背景预览绘制失败', error);
+        }
+    }
+
+    function updateBackgroundPanNote() {
+        const note = modal?.querySelector('#qqaw-bg-pan-note');
+        if (!note) return;
+        const image = backgroundState.loadedImage;
+        const { width, height } = backgroundPreviewSize();
+        const metrics = backgroundRenderMetrics(image, width, height);
+        if (!metrics) {
+            note.textContent = '选择一张背景图后即可拖动构图。';
+            return;
+        }
+        if (metrics.overflowX < 1 && metrics.overflowY < 1) note.textContent = '当前图片比例刚好贴合预览；提高缩放后可以自由移动。';
+        else if (metrics.overflowX < 1) note.textContent = '当前没有横向余量；提高缩放后可以左右移动。';
+        else if (metrics.overflowY < 1) note.textContent = '当前没有纵向余量；提高缩放后可以上下移动。';
+        else note.textContent = '拖动图片或使用滑杆选择背景的显示范围。';
+    }
+
+    function previewBackgroundOnTavern() {
+        if (!backgroundState.loadedImage || !backgroundState.objectUrl) return;
+        backgroundState.previewing = true;
+        renderBackgroundLayer(backgroundState.objectUrl, backgroundState.loadedImage, backgroundState.layout);
+    }
+
+    function updateBackgroundPreview() {
+        if (!modal) return;
+        backgroundState.layout = normalizeBackgroundLayout(backgroundState.layout);
+        renderBackgroundPreviewCanvas();
+        updateBackgroundPanNote();
+        const zoom = modal.querySelector('#qqaw-bg-zoom');
+        const x = modal.querySelector('#qqaw-bg-x');
+        const y = modal.querySelector('#qqaw-bg-y');
+        if (zoom) zoom.value = backgroundState.layout.zoom;
+        if (x) x.value = backgroundState.layout.x;
+        if (y) y.value = backgroundState.layout.y;
+        const zv = modal.querySelector('#qqaw-bg-zoom-value');
+        const xv = modal.querySelector('#qqaw-bg-x-value');
+        const yv = modal.querySelector('#qqaw-bg-y-value');
+        if (zv) zv.value = `${backgroundState.layout.zoom.toFixed(2)}×`;
+        if (xv) xv.value = `${Math.round(backgroundState.layout.x)}%`;
+        if (yv) yv.value = `${Math.round(backgroundState.layout.y)}%`;
+        syncBackgroundOrientationUi();
+        syncBackgroundScopeUi();
+        if (settings.workbenchMode === 'background' && !modal.classList.contains('qqaw-hidden')) previewBackgroundOnTavern();
+    }
+
+    async function loadBackgroundBlobIntoEditor(blob, { assetId = '', name = '', layout = DEFAULT_BACKGROUND_LAYOUT } = {}) {
+        if (!blob) throw new Error('背景图片为空。');
+        revokeBackgroundEditorObjectUrl();
+        backgroundState.objectUrl = URL.createObjectURL(blob);
+        backgroundState.sourceBlob = blob;
+        backgroundState.assetId = assetId;
+        backgroundState.assetName = name || '背景图片';
+        backgroundState.layout = normalizeBackgroundLayout(layout);
+        backgroundState.loadedImage = await loadImageElement(backgroundState.objectUrl);
+        updateBackgroundPreview();
+    }
+
+    async function onBackgroundFilePicked(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+            backgroundState.file = file;
+            await loadBackgroundBlobIntoEditor(file, {
+                assetId: '',
+                name: file.name,
+                layout: DEFAULT_BACKGROUND_LAYOUT,
+            });
+        } catch (error) {
+            console.error(error);
+            notify('error', '无法读取这张背景图片。');
+        } finally {
+            event.target.value = '';
+        }
+    }
+
+    function extractCssBackgroundUrl() {
+        for (const selector of ['#bg_custom', '#bg1', 'body']) {
+            const el = document.querySelector(selector);
+            if (!el) continue;
+            const value = getComputedStyle(el).backgroundImage || '';
+            const match = value.match(/url\(["']?(.*?)["']?\)/);
+            if (match?.[1] && !match[1].includes('qqaw')) return match[1];
+        }
+        return '';
+    }
+
+    async function loadBackgroundEditorFromEffective(showMessage = false) {
+        try {
+            const effective = resolveEffectiveBackgroundAssignment();
+            if (effective?.assetId) {
+                const asset = await backgroundAssetGet(effective.assetId);
+                if (asset?.blob) {
+                    await loadBackgroundBlobIntoEditor(asset.blob, {
+                        assetId: asset.id,
+                        name: asset.name,
+                        layout: effective.layout || DEFAULT_BACKGROUND_LAYOUT,
+                    });
+                    if (showMessage) notify('success', `已载入${currentBackgroundScopeLabel(effective.effectiveScope)}背景。`);
+                    return;
+                }
+            }
+
+            const nativeUrl = extractCssBackgroundUrl();
+            if (nativeUrl) {
+                const response = await fetch(nativeUrl, { cache: 'no-cache' });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    await loadBackgroundBlobIntoEditor(blob, { name: 'SillyTavern 当前背景', layout: DEFAULT_BACKGROUND_LAYOUT });
+                    if (showMessage) notify('success', '已载入当前酒馆背景；保存后会由丘丘工作台管理。');
+                    return;
+                }
+            }
+            backgroundState.loadedImage = null;
+            backgroundState.sourceBlob = null;
+            backgroundState.assetId = '';
+            backgroundState.layout = { ...DEFAULT_BACKGROUND_LAYOUT };
+            renderBackgroundPreviewCanvas();
+            updateBackgroundPanNote();
+            if (showMessage) notify('info', '当前没有丘丘工作台背景，请选择一张新图片。');
+        } catch (error) {
+            console.warn('[丘丘头像工作台] 载入背景失败', error);
+            if (showMessage) notify('warning', '当前背景无法直接读取，你可以选择一张新背景图。');
+        }
+    }
+
+    async function saveBackgroundAssignment() {
+        const button = modal?.querySelector('#qqaw-bg-save');
+        if (!backgroundState.loadedImage || !backgroundState.sourceBlob) {
+            notify('warning', '请先选择或载入一张背景图。');
+            return;
+        }
+        const oldText = button?.textContent;
+        if (button) {
+            button.disabled = true;
+            button.textContent = '保存中…';
+        }
+        try {
+            let assetId = backgroundState.assetId;
+            if (!assetId) {
+                const asset = await backgroundAssetPut(
+                    backgroundState.sourceBlob,
+                    backgroundState.assetName,
+                    backgroundState.loadedImage.naturalWidth,
+                    backgroundState.loadedImage.naturalHeight,
+                );
+                assetId = asset.id;
+                backgroundState.assetId = assetId;
+            }
+            const assignment = {
+                assetId,
+                layout: normalizeBackgroundLayout(backgroundState.layout),
+                name: backgroundState.assetName,
+                createdAt: Date.now(),
+            };
+            if (backgroundState.scope === 'chat') {
+                await setChatBackgroundAssignment(assignment);
+            } else if (backgroundState.scope === 'theme') {
+                settings.backgroundThemes[getCurrentThemeName()] = assignment;
+                saveSettings();
+            } else {
+                settings.backgroundPermanent = assignment;
+                saveSettings();
+            }
+            backgroundState.previewing = false;
+            await applyEffectiveBackground();
+            syncBackgroundScopeUi();
+            notify('success', `背景已应用到：${currentBackgroundScopeLabel(backgroundState.scope)}。`);
+        } catch (error) {
+            console.error('[丘丘头像工作台] 保存背景失败', error);
+            notify('error', error.message || '背景保存失败。');
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = oldText || '应用背景';
+            }
+        }
+    }
+
+    async function clearBackgroundAssignmentForCurrentScope() {
+        try {
+            if (backgroundState.scope === 'chat') {
+                await setChatBackgroundAssignment(null);
+            } else if (backgroundState.scope === 'theme') {
+                delete settings.backgroundThemes[getCurrentThemeName()];
+                saveSettings();
+            } else {
+                settings.backgroundPermanent = null;
+                saveSettings();
+            }
+            backgroundState.previewing = false;
+            await applyEffectiveBackground();
+            await loadBackgroundEditorFromEffective(false);
+            syncBackgroundScopeUi();
+            notify('success', `已清除${currentBackgroundScopeLabel(backgroundState.scope)}背景。`);
+        } catch (error) {
+            console.error('[丘丘头像工作台] 清除背景失败', error);
+            notify('error', error.message || '清除背景失败。');
+        }
+    }
+
+    function backgroundPanCapacities() {
+        const image = backgroundState.loadedImage;
+        const { width, height } = backgroundPreviewSize();
+        const metrics = backgroundRenderMetrics(image, width, height);
+        return metrics || { overflowX: 0, overflowY: 0 };
+    }
+
+    function beginBackgroundDrag(event) {
+        if (!backgroundState.loadedImage) return;
+        const shell = event.currentTarget;
+        shell.setPointerCapture?.(event.pointerId);
+        backgroundState.pointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+        if (backgroundState.pointers.size === 1) {
+            backgroundState.dragging = true;
+            backgroundState.dragStart = {
+                clientX: event.clientX,
+                clientY: event.clientY,
+                x: backgroundState.layout.x,
+                y: backgroundState.layout.y,
+            };
+            backgroundState.pinchStart = null;
+        } else if (backgroundState.pointers.size >= 2) {
+            const [a, b] = [...backgroundState.pointers.values()];
+            backgroundState.pinchStart = {
+                distance: pointerDistance(a, b),
+                zoom: backgroundState.layout.zoom,
+            };
+        }
+        event.preventDefault();
+    }
+
+    function dragBackgroundPreview(event) {
+        if (!backgroundState.pointers.has(event.pointerId)) return;
+        backgroundState.pointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+        if (backgroundState.pointers.size >= 2 && backgroundState.pinchStart) {
+            const [a, b] = [...backgroundState.pointers.values()];
+            const distance = Math.max(1, pointerDistance(a, b));
+            backgroundState.layout.zoom = clamp(backgroundState.pinchStart.zoom * (distance / Math.max(1, backgroundState.pinchStart.distance)), 1, 3);
+            updateBackgroundPreview();
+            return;
+        }
+        if (!backgroundState.dragging || !backgroundState.dragStart) return;
+        const shell = modal?.querySelector('#qqaw-bg-preview-shell');
+        const rect = shell?.getBoundingClientRect();
+        if (!rect?.width || !rect?.height) return;
+        const { overflowX, overflowY } = backgroundPanCapacities();
+        const scaleX = backgroundPreviewSize().width / rect.width;
+        const scaleY = backgroundPreviewSize().height / rect.height;
+        const dx = (event.clientX - backgroundState.dragStart.clientX) * scaleX;
+        const dy = (event.clientY - backgroundState.dragStart.clientY) * scaleY;
+        if (overflowX > .5) backgroundState.layout.x = clamp(backgroundState.dragStart.x - (dx / overflowX) * 100, 0, 100);
+        if (overflowY > .5) backgroundState.layout.y = clamp(backgroundState.dragStart.y - (dy / overflowY) * 100, 0, 100);
+        updateBackgroundPreview();
+    }
+
+    function endBackgroundDrag(event) {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        backgroundState.pointers.delete(event.pointerId);
+        if (backgroundState.pointers.size < 2) backgroundState.pinchStart = null;
+        if (backgroundState.pointers.size === 0) {
+            backgroundState.dragging = false;
+            backgroundState.dragStart = null;
+        }
+    }
+
+    function onBackgroundPreviewWheel(event) {
+        if (!backgroundState.loadedImage) return;
+        event.preventDefault();
+        const factor = event.deltaY < 0 ? 1.06 : 1 / 1.06;
+        backgroundState.layout.zoom = clamp(backgroundState.layout.zoom * factor, 1, 3);
+        updateBackgroundPreview();
+    }
+
+    function syncWorkbenchModeUi() {
+        if (!modal) return;
+        const mode = settings.workbenchMode === 'background' ? 'background' : 'avatar';
+        modal.querySelector('#qqaw-avatar-workspace')?.toggleAttribute('hidden', mode !== 'avatar');
+        modal.querySelector('#qqaw-background-workspace')?.toggleAttribute('hidden', mode !== 'background');
+        modal.querySelectorAll('.qqaw-workbench-mode-button').forEach((button) => {
+            const active = button.dataset.mode === mode;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        const subtitle = modal.querySelector('#qqaw-subtitle');
+        if (subtitle) subtitle.textContent = mode === 'background' ? '背景 · 自由构图 · 分范围保存' : '快速更换 · 主题预览 · 收藏回滚';
+    }
+
+    async function switchWorkbenchMode(mode) {
+        const next = mode === 'background' ? 'background' : 'avatar';
+        if (next === settings.workbenchMode) return;
+        if (settings.workbenchMode === 'background' && backgroundState.previewing) {
+            backgroundState.previewing = false;
+            await applyEffectiveBackground();
+        }
+        settings.workbenchMode = next;
+        saveSettings();
+        syncWorkbenchModeUi();
+        if (next === 'background') {
+            backgroundState.scope = settings.backgroundScope;
+            backgroundState.previewOrientation = settings.backgroundPreviewOrientation;
+            syncBackgroundScopeUi();
+            syncBackgroundOrientationUi();
+            await loadBackgroundEditorFromEffective(false);
+        } else {
+            scheduleThemePreview();
+        }
     }
 
     function syncPreviewLayoutUi() {
@@ -1116,6 +1873,13 @@
         syncTargetUi();
         syncReplaceScopeUi();
         syncPreviewLayoutUi();
+        backgroundState.scope = settings.backgroundScope;
+        backgroundState.previewOrientation = settings.backgroundPreviewOrientation;
+        syncWorkbenchModeUi();
+        syncBackgroundScopeUi();
+        syncBackgroundOrientationUi();
+        syncBackgroundSummaryUi();
+        if (settings.workbenchMode === 'background') loadBackgroundEditorFromEffective(false);
         const shell = modal.querySelector('#qqaw-preview-shell');
         shell.style.setProperty('--qqaw-aspect-w', 2);
         shell.style.setProperty('--qqaw-aspect-h', 3);
@@ -1136,6 +1900,17 @@
         state.dragging = false;
         revokeHistoryObjectUrls();
         clearThemePreview();
+        if (backgroundState.previewing) {
+            backgroundState.previewing = false;
+            applyEffectiveBackground();
+        }
+        revokeBackgroundEditorObjectUrl();
+        backgroundState.file = null;
+        backgroundState.sourceBlob = null;
+        backgroundState.loadedImage = null;
+        backgroundState.pointers.clear();
+        backgroundState.dragging = false;
+        backgroundState.pinchStart = null;
     }
 
     function syncTargetUi() {
@@ -1666,6 +2441,10 @@
                 const db = request.result;
                 if (!db.objectStoreNames.contains(HISTORY_STORE)) {
                     const store = db.createObjectStore(HISTORY_STORE, { keyPath: 'id' });
+                    store.createIndex('createdAt', 'createdAt');
+                }
+                if (!db.objectStoreNames.contains(BACKGROUND_STORE)) {
+                    const store = db.createObjectStore(BACKGROUND_STORE, { keyPath: 'id' });
                     store.createIndex('createdAt', 'createdAt');
                 }
             };
@@ -2762,6 +3541,8 @@
             setTimeout(() => {
                 scanMessages(document);
                 scheduleChatOverrideReapply();
+                scheduleBackgroundApply();
+                syncBackgroundSummaryUi();
             }, 0);
         };
 
@@ -2773,6 +3554,8 @@
             types.MESSAGE_RECEIVED,
             types.MESSAGE_UPDATED,
             types.USER_MESSAGE_RENDERED,
+            types.SETTINGS_UPDATED,
+            types.THEME_CHANGED,
         ].filter(Boolean).forEach((eventName) => source.on(eventName, refresh));
 
         if (types.MESSAGE_SENT) {
@@ -2863,8 +3646,25 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            window.addEventListener('resize', () => syncProtectedUserAvatarLayers(document), { passive: true });
-            globalThis.visualViewport?.addEventListener?.('resize', () => syncProtectedUserAvatarLayers(document), { passive: true });
+            window.addEventListener('resize', () => {
+                syncProtectedUserAvatarLayers(document);
+                if (backgroundState.previewing) previewBackgroundOnTavern();
+                else scheduleBackgroundApply();
+            }, { passive: true });
+            globalThis.visualViewport?.addEventListener?.('resize', () => {
+                syncProtectedUserAvatarLayers(document);
+                if (backgroundState.previewing) previewBackgroundOnTavern();
+                else scheduleBackgroundApply();
+            }, { passive: true });
+            document.addEventListener('change', (event) => {
+                if (event.target?.matches?.('#themes, #ui-preset-name, select[name="theme"]')) {
+                    setTimeout(() => {
+                        syncBackgroundSummaryUi();
+                        scheduleBackgroundApply();
+                    }, 0);
+                }
+            }, true);
+            await applyEffectiveBackground();
             if (clearedLegacyOverride) {
                 const ctx = liveContext();
                 if (typeof ctx.reloadCurrentChat === 'function') {
@@ -2874,7 +3674,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.2.1 已加载（头像显示保护层兼容模式）');
+            console.info('[丘丘头像工作台] v0.3.0 已加载（头像 + 背景工作台）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

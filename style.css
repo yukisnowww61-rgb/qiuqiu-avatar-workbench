@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.2.3 · compact cute glass UI */
+/* 丘丘头像工作台 v0.3.0 · compact cute glass UI */
 
 .qqaw-name-button {
     appearance: none;
@@ -622,3 +622,231 @@
 
 /* “仅本次聊天”使用内部临时头像文件，不让它们挤进 Persona 头像列表。 */
 #user_avatar_block [imgfile^="__qqaw_chat_"] { display: none !important; }
+
+/* =========================================================
+   v0.3.0 · 背景工作台
+   ========================================================= */
+.qqaw-workbench-mode-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin: 0 0 10px;
+    padding: 3px;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 999px;
+    background: color-mix(in srgb, #fff 60%, transparent);
+}
+.qqaw-workbench-mode-button,
+.qqaw-bg-scope-button,
+.qqaw-bg-orientation-button {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, transform .16s ease, opacity .16s ease;
+}
+.qqaw-workbench-mode-button {
+    min-width: 64px;
+    padding: 6px 13px;
+    font-size: .72rem;
+    font-weight: 760;
+    opacity: .56;
+}
+.qqaw-workbench-mode-button.active,
+.qqaw-bg-scope-button.active,
+.qqaw-bg-orientation-button.active {
+    opacity: 1;
+    background: color-mix(in srgb, var(--qqaw-pink) 20%, #fff 80%);
+    border-color: color-mix(in srgb, var(--qqaw-pink) 42%, transparent);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--qqaw-pink) 12%, transparent);
+}
+.qqaw-workbench-mode-button:active,
+.qqaw-bg-scope-button:active,
+.qqaw-bg-orientation-button:active { transform: translateY(1px); }
+
+#qqaw-avatar-workspace[hidden],
+#qqaw-background-workspace[hidden] { display: none !important; }
+
+.qqaw-background-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 11px;
+    padding: 10px 12px;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 15px;
+    background: color-mix(in srgb, #fff 54%, transparent);
+}
+.qqaw-background-summary-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    font-size: .64rem;
+    opacity: .58;
+    text-align: right;
+}
+.qqaw-background-summary-text span {
+    max-width: min(52vw, 330px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.qqaw-bg-main-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 1.08fr) minmax(250px, .92fr);
+    gap: 11px;
+    align-items: start;
+}
+.qqaw-bg-preview-panel,
+.qqaw-bg-controls-panel { min-width: 0; }
+.qqaw-bg-preview-shell {
+    position: relative;
+    width: min(100%, 390px);
+    margin-inline: auto;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--qqaw-pink) 28%, var(--qqaw-line));
+    border-radius: 16px;
+    background:
+        linear-gradient(45deg, rgb(127 127 127 / 7%) 25%, transparent 25%, transparent 75%, rgb(127 127 127 / 7%) 75%),
+        linear-gradient(45deg, rgb(127 127 127 / 7%) 25%, transparent 25%, transparent 75%, rgb(127 127 127 / 7%) 75%),
+        #fff;
+    background-size: 18px 18px;
+    background-position: 0 0, 9px 9px;
+    box-shadow: 0 12px 30px rgb(50 37 44 / 10%);
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    transition: aspect-ratio .18s ease, max-width .18s ease;
+}
+.qqaw-bg-preview-shell:active { cursor: grabbing; }
+.qqaw-bg-preview-shell.qqaw-bg-preview-portrait {
+    aspect-ratio: 9 / 16;
+    max-width: 300px;
+}
+.qqaw-bg-preview-shell.qqaw-bg-preview-landscape {
+    aspect-ratio: 16 / 9;
+    max-width: 470px;
+}
+#qqaw-bg-preview-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    pointer-events: none;
+}
+.qqaw-bg-device-ui {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+.qqaw-bg-device-top {
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    top: 4%;
+    height: 7%;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 26%);
+    border: 1px solid rgb(255 255 255 / 36%);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+.qqaw-bg-device-chat {
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    top: 15%;
+    bottom: 16%;
+    border-radius: 18px;
+    background: rgb(255 255 255 / 11%);
+    border: 1px solid rgb(255 255 255 / 26%);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 3%);
+}
+.qqaw-bg-device-input {
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    bottom: 5%;
+    height: 7%;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 34%);
+    border: 1px solid rgb(255 255 255 / 42%);
+}
+.qqaw-bg-preview-landscape .qqaw-bg-device-top {
+    left: 18%; right: 18%; top: 5%; height: 9%;
+}
+.qqaw-bg-preview-landscape .qqaw-bg-device-chat {
+    left: 14%; right: 14%; top: 19%; bottom: 18%;
+}
+.qqaw-bg-preview-landscape .qqaw-bg-device-input {
+    left: 24%; right: 24%; bottom: 6%; height: 8%;
+}
+
+.qqaw-bg-scope-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0 5px;
+}
+.qqaw-bg-scope-button,
+.qqaw-bg-orientation-button {
+    padding: 5px 10px;
+    font-size: .66rem;
+    font-weight: 730;
+    opacity: .58;
+}
+.qqaw-bg-clear-button { margin-top: 7px; }
+
+#qqaw-background-layer {
+    position: absolute !important;
+    inset: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    user-select: none !important;
+    z-index: 999 !important;
+    background: transparent !important;
+}
+#qqaw-background-layer[hidden] { display: none !important; }
+#qqaw-background-image {
+    position: absolute !important;
+    display: block !important;
+    max-width: none !important;
+    max-height: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    object-fit: fill !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    pointer-events: none !important;
+}
+
+@container (max-width: 620px) {
+    .qqaw-bg-main-grid { grid-template-columns: 1fr; }
+    .qqaw-background-summary { align-items: flex-start; }
+    .qqaw-background-summary-text { align-items: flex-end; }
+    .qqaw-bg-preview-shell.qqaw-bg-preview-portrait { max-width: min(72cqw, 300px); }
+    .qqaw-bg-preview-shell.qqaw-bg-preview-landscape { max-width: 100%; }
+}
+
+@container (max-width: 420px) {
+    .qqaw-workbench-mode-button { min-width: 54px; padding-inline: 10px; }
+    .qqaw-background-summary { flex-direction: column; }
+    .qqaw-background-summary-text { align-items: flex-start; text-align: left; }
+    .qqaw-bg-scope-row { gap: 4px; }
+    .qqaw-bg-scope-button { padding-inline: 8px; }
+}
