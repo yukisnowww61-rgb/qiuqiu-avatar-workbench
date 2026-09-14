@@ -798,9 +798,14 @@
         $('#qqaw-clear-chat-avatar').addEventListener('click', removeCurrentChatOverride);
         modal.querySelectorAll('.qqaw-scope-button').forEach((button) => {
             button.addEventListener('click', () => {
-                state.replaceScope = button.dataset.scope === 'chat' ? 'chat' : 'permanent';
-                settings.replaceScope = state.replaceScope;
-                saveSettings();
+                const requested = button.dataset.scope === 'chat' ? 'chat' : 'permanent';
+                if (state.target?.kind === 'char' && requested === 'chat') return;
+                state.replaceScope = requested;
+                // 替换范围偏好只用于 USER；CHAR 永远固定为永久替换。
+                if (state.target?.kind === 'user') {
+                    settings.replaceScope = state.replaceScope;
+                    saveSettings();
+                }
                 syncTargetUi();
                 syncReplaceScopeUi();
             });
@@ -960,20 +965,31 @@
 
     function syncReplaceScopeUi() {
         if (!modal) return;
+        const isChar = state.target?.kind === 'char';
+        if (isChar) state.replaceScope = 'permanent';
+
         modal.querySelectorAll('.qqaw-scope-button').forEach((button) => {
+            const isChatButton = button.dataset.scope === 'chat';
+            // CHAR 不支持“仅本次聊天”，直接隐藏这个选项；USER 保持两种模式不变。
+            button.hidden = isChar && isChatButton;
             button.classList.toggle('active', button.dataset.scope === state.replaceScope);
         });
+
         const note = modal.querySelector('#qqaw-scope-note');
         const replace = modal.querySelector('#qqaw-replace-avatar');
-        if (state.replaceScope === 'chat') {
-            note.textContent = '只覆盖当前聊天中的这个头像，不修改角色卡或 Persona 本体；切换到别的聊天仍使用原头像。';
+        if (isChar) {
+            note.textContent = 'CHAR 头像仅支持永久替换；新头像会写入 Character，并用于该角色的其他聊天。';
+            replace.textContent = '裁剪并替换 · 永久';
+        } else if (state.replaceScope === 'chat') {
+            note.textContent = '只覆盖当前聊天中的 USER 头像，不修改 Persona 本体；切换到别的聊天仍使用原头像。';
             replace.textContent = '裁剪并替换 · 仅本次聊天';
         } else {
-            note.textContent = '直接修改 Character / Persona 的头像文件，其他聊天也会使用新头像。';
+            note.textContent = '直接修改 Persona 的头像文件，其他聊天也会使用新头像。';
             replace.textContent = '裁剪并替换 · 永久';
         }
+
         const clearButton = modal.querySelector('#qqaw-clear-chat-avatar');
-        if (clearButton) clearButton.hidden = !getChatOverrideForTarget(state.target);
+        if (clearButton) clearButton.hidden = isChar || !getChatOverrideForTarget(state.target);
     }
 
     async function removeCurrentChatOverride() {
@@ -1015,7 +1031,9 @@
         state.file = null;
         state.sourceKind = 'current';
         state.aspect = { ...DEFAULT_ASPECT };
-        state.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
+        state.replaceScope = target?.kind === 'char'
+            ? 'permanent'
+            : (settings.replaceScope === 'chat' ? 'chat' : 'permanent');
         modal.classList.remove('qqaw-hidden');
         document.body.classList.add('qqaw-modal-open');
         requestAnimationFrame(() => applyModalRect(settings.modalRect, false));
@@ -1069,7 +1087,11 @@
         state.layout = getSavedLayout(target);
         state.file = null;
         state.sourceKind = 'current';
+        state.replaceScope = target.kind === 'char'
+            ? 'permanent'
+            : (settings.replaceScope === 'chat' ? 'chat' : 'permanent');
         syncTargetUi();
+        syncReplaceScopeUi();
         updatePreview();
         loadTargetImage(true);
         renderHistory();
@@ -1151,6 +1173,7 @@
     }
 
     async function setChatOverride(target, file) {
+        if (target?.kind !== 'user') throw new Error('CHAR 头像不支持“仅本次聊天”替换。');
         const store = getChatOverrideStore(true);
         if (!store) throw new Error('当前聊天 metadata 不可用，无法保存“仅本次聊天”头像。');
         const key = overrideKeyForTarget(target);
@@ -1188,7 +1211,9 @@
     function findChatOverrideForMessage(message) {
         if (!message) return null;
         const isUser = message.getAttribute('is_user') === 'true';
-        const kind = isUser ? 'user' : 'char';
+        // v0.1.6 起聊天级头像只支持 USER，忽略旧版本可能遗留的 CHAR 临时覆盖。
+        if (!isUser) return null;
+        const kind = 'user';
         const name = message.querySelector('.name_text')?.textContent?.trim() || '';
         const parsed = parseAvatarRef(message.querySelector('.avatar img')?.src);
         const overrides = allChatOverrides();
@@ -1256,6 +1281,7 @@
     }
 
     async function uploadChatScopedAvatar(target, blob) {
+        if (target?.kind !== 'user') throw new Error('CHAR 头像不支持“仅本次聊天”替换。');
         const chatIdentity = getCurrentChatIdentity();
         const suffix = hashString(`${target.kind}|${target.key}|${target.name}`);
         const file = `__qqaw_chat_${hashString(chatIdentity)}_${suffix}.${avatarExtension(blob)}`;
@@ -1341,6 +1367,7 @@
         const all = await historyGetAll();
         return all
             .filter((item) => historyTargetMatches(item, target))
+            .filter((item) => target?.kind !== 'char' || item.scope !== 'chat')
             .filter((item) => item.scope !== 'chat' || item.chatId === chatId)
             .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     }
@@ -1787,6 +1814,7 @@
     }
 
     async function replaceAvatar() {
+        if (state.target?.kind === 'char') state.replaceScope = 'permanent';
         if (!state.target?.key) {
             notify('warning', '没有识别到要替换的头像。');
             return;
@@ -2121,7 +2149,7 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.5 已加载');
+            console.info('[丘丘头像工作台] v0.1.6 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
