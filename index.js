@@ -11,7 +11,8 @@
     const HISTORY_DB_VERSION = 1;
     const HISTORY_STORE = 'avatarHistory';
     const HISTORY_LIMIT = 8;
-    const CHAT_STORE_VERSION = 2;
+    const CHAT_STORE_VERSION = 3;
+    const MESSAGE_ORIGINAL_FORCE_FIELD = 'qiuqiu_avatar_workbench_original_force_avatar';
 
     let context;
     let settings;
@@ -130,56 +131,59 @@
         return { character: list[index], charId: index };
     }
 
+    function getActivePersonaId() {
+        const ctx = liveContext();
+        const selected = document.querySelector('#user_avatar_block .avatar-container.selected');
+        const selectedId = selected?.getAttribute('data-avatar-id')
+            || selected?.querySelector?.('.avatar')?.getAttribute?.('data-avatar-id')
+            || selected?.querySelector?.('.avatar')?.getAttribute?.('imgfile')
+            || selected?.querySelector?.('img')?.getAttribute?.('data-avatar-id');
+        if (selectedId) return selectedId;
+
+        const quick = parseAvatarRef(document.querySelector('#quickPersonaImg')?.src || '');
+        if (quick?.type === 'persona' && quick.file) return quick.file;
+
+        const locked = ctx.chatMetadata?.persona;
+        if (locked) return String(locked);
+
+        return '';
+    }
+
+    function getActiveUserTarget(fallbackName = '', fallbackSource = '') {
+        const ctx = liveContext();
+        const fallbackParsed = parseAvatarRef(fallbackSource);
+        const key = getActivePersonaId()
+            || (fallbackParsed?.type === 'persona' ? fallbackParsed.file : '')
+            || '';
+        return {
+            kind: 'user',
+            key,
+            name: ctx.name1 || fallbackName || 'USER',
+            sourceUrl: key ? `/User%20Avatars/${encodeURIComponent(key)}` : (fallbackSource || ''),
+            charId: null,
+            character: null,
+        };
+    }
     function getTargetFromMessage(message) {
         if (!message) return null;
         const isUser = message.getAttribute('is_user') === 'true';
         const img = message.querySelector('.avatar img');
         const nameNode = message.querySelector('.name_text');
+        const displayName = nameNode?.textContent?.trim() || (isUser ? liveContext().name1 : liveContext().name2) || '';
+
+        // USER 工作台始终操作“当前实际选中的 Persona”，不再从历史消息头像反推。
+        // ST 会把每条 USER 消息发送当时的 Persona 写进 force_avatar，因此历史消息
+        // 可能仍显示旧 Persona；如果用它来识别当前 USER，会把工作台绑定到错误的头像。
+        if (isUser) return getActiveUserTarget(displayName, img?.src || '');
+
         const parsed = parseAvatarRef(img?.src);
-        const displayName = nameNode?.textContent?.trim() || (isUser ? context.name1 : context.name2) || '';
         const originalKey = message.dataset.qqawOriginalKey || '';
         const originalKind = message.dataset.qqawOriginalKind || '';
         const originalCharId = message.dataset.qqawOriginalCharId;
-        const tempOverride = parsed?.file?.startsWith('__qqaw_chat_')
-            ? allChatOverrides().find((item) => item?.file === parsed.file && item.kind === (isUser ? 'user' : 'char'))
-            : null;
 
-        if (tempOverride) {
-            if (isUser) {
-                return {
-                    kind: 'user',
-                    key: tempOverride.targetKey || '',
-                    name: tempOverride.targetName || displayName || 'USER',
-                    sourceUrl: img?.src || '',
-                    charId: null,
-                    character: null,
-                };
-            }
-            const tempCharId = tempOverride.charId != null && Number.isInteger(Number(tempOverride.charId)) ? Number(tempOverride.charId) : null;
-            const tempCharacter = tempCharId != null ? context.characters?.[tempCharId] : getCharacterByAvatar(tempOverride.targetKey)?.character;
-            return {
-                kind: 'char',
-                key: tempOverride.targetKey || tempCharacter?.avatar || '',
-                name: tempOverride.targetName || tempCharacter?.name || tempCharacter?.data?.name || displayName || 'CHAR',
-                sourceUrl: img?.src || '',
-                charId: tempCharId,
-                character: tempCharacter ?? null,
-            };
-        }
-
-        if (originalKey && originalKind === (isUser ? 'user' : 'char')) {
-            if (isUser) {
-                return {
-                    kind: 'user',
-                    key: originalKey,
-                    name: message.dataset.qqawOriginalName || displayName || 'USER',
-                    sourceUrl: img?.src || '',
-                    charId: null,
-                    character: null,
-                };
-            }
+        if (originalKey && originalKind === 'char') {
             const charId = originalCharId !== '' && Number.isInteger(Number(originalCharId)) ? Number(originalCharId) : null;
-            const character = charId != null ? context.characters?.[charId] : getCharacterByAvatar(originalKey)?.character;
+            const character = charId != null ? liveContext().characters?.[charId] : getCharacterByAvatar(originalKey)?.character;
             return {
                 kind: 'char',
                 key: originalKey,
@@ -190,26 +194,15 @@
             };
         }
 
-        if (isUser) {
-            const key = parsed?.type === 'persona' ? parsed.file : parsed?.file;
-            return {
-                kind: 'user',
-                key: key || '',
-                name: displayName || 'USER',
-                sourceUrl: img?.src || '',
-                charId: null,
-                character: null,
-            };
-        }
-
         let match = parsed?.file ? getCharacterByAvatar(parsed.file) : null;
+        const ctx = liveContext();
         if (!match && displayName) {
-            const byName = (context.characters ?? []).findIndex((char) => (char?.name || char?.data?.name || '') === displayName);
-            if (byName >= 0) match = { character: context.characters[byName], charId: byName };
+            const byName = (ctx.characters ?? []).findIndex((char) => (char?.name || char?.data?.name || '') === displayName);
+            if (byName >= 0) match = { character: ctx.characters[byName], charId: byName };
         }
-        if (!match && context.groupId == null && context.characterId != null && context.characterId !== '' && Number.isInteger(Number(context.characterId))) {
-            const charId = Number(context.characterId);
-            const character = context.characters?.[charId];
+        if (!match && ctx.groupId == null && ctx.characterId != null && ctx.characterId !== '' && Number.isInteger(Number(ctx.characterId))) {
+            const charId = Number(ctx.characterId);
+            const character = ctx.characters?.[charId];
             if (character) match = { character, charId };
         }
 
@@ -225,8 +218,11 @@
             character: match?.character ?? null,
         };
     }
-
     function latestMessageTarget(kind) {
+        if (kind === 'user') {
+            const active = getActiveUserTarget();
+            if (active?.key) return active;
+        }
         const selector = kind === 'user'
             ? '#chat .mes[is_user="true"]:not(.template_element)'
             : '#chat .mes[is_user="false"]:not(.template_element)';
@@ -1123,12 +1119,11 @@
         const ctx = liveContext();
         return String(ctx.getCurrentChatId?.() || ctx.chatId || ctx.chatMetadata?.integrity || 'chat');
     }
-
     function overrideKeyForTarget(target) {
         if (!target) return '';
-        const stable = target.kind === 'char'
-            ? (target.character?.avatar || target.key || target.name)
-            : (target.key || target.name);
+        // 本次聊天 USER 头像是“整个聊天”的显示覆盖，不绑定某一条历史 Persona。
+        if (target.kind === 'user') return 'user:__chat__';
+        const stable = target.character?.avatar || target.key || target.name;
         return `${target.kind}:${stable}`;
     }
 
@@ -1146,16 +1141,20 @@
     function allChatOverrides() {
         return Object.values(getChatOverrideStore(false)?.overrides ?? {});
     }
-
     function getChatOverrideForTarget(target) {
         if (!target) return null;
         const overrides = getChatOverrideStore(false)?.overrides ?? {};
+        if (target.kind === 'user') {
+            return overrides['user:__chat__']
+                || Object.values(overrides).find((item) => item?.kind === 'user')
+                || null;
+        }
         const exact = overrides[overrideKeyForTarget(target)];
         if (exact) return exact;
         return Object.values(overrides).find((item) => {
             if (!item || item.kind !== target.kind) return false;
             if (item.targetKey && target.key && item.targetKey === target.key) return true;
-            if (target.kind === 'char' && item.charId != null && target.charId != null && Number(item.charId) === Number(target.charId)) return true;
+            if (item.charId != null && target.charId != null && Number(item.charId) === Number(target.charId)) return true;
             return Boolean(item.targetName && target.name && item.targetName === target.name);
         }) || null;
     }
@@ -1165,20 +1164,8 @@
         const base = `/User%20Avatars/${encodeURIComponent(override.file)}`;
         return `${base}?qqawchat=${encodeURIComponent(override.createdAt || Date.now())}`;
     }
-
     function chatMessageMatchesUserTarget(message, target) {
-        if (!message?.is_user || target?.kind !== 'user') return false;
-        const original = String(message.original_avatar || '');
-        if (target.key && original === target.key) return true;
-
-        const parsedForce = parseAvatarRef(message.force_avatar || '');
-        if (target.key && parsedForce?.file === target.key) return true;
-
-        // 临时头像写入后 force_avatar 会指向 __qqaw_chat_*，
-        // 此时 original_avatar 是回到原 Persona 的稳定锚点。
-        if (parsedForce?.file?.startsWith('__qqaw_chat_') && target.key && original === target.key) return true;
-
-        return Boolean(target.name && message.name && String(message.name).trim() === String(target.name).trim());
+        return Boolean(message?.is_user && target?.kind === 'user');
     }
 
     async function saveCurrentChatNow() {
@@ -1189,7 +1176,6 @@
         }
         await persistChatMetadata({ flush: true });
     }
-
     async function syncUserMessagesToAvatar(target, avatarUrl) {
         if (target?.kind !== 'user' || !avatarUrl) return 0;
         const ctx = liveContext();
@@ -1197,8 +1183,19 @@
         let changed = 0;
 
         for (const message of messages) {
-            if (!chatMessageMatchesUserTarget(message, target)) continue;
-            message.original_avatar = target.key || message.original_avatar || '';
+            if (!message?.is_user) continue;
+            message.extra ??= {};
+            if (!Object.prototype.hasOwnProperty.call(message.extra, MESSAGE_ORIGINAL_FORCE_FIELD)) {
+                // 保存“启用本次聊天覆盖之前”每条消息自己的 Persona 头像。
+                // 取消覆盖时按消息逐条恢复，不会把历史 Persona 信息抹掉。
+                const currentForce = message.force_avatar ?? null;
+                const parsed = parseAvatarRef(currentForce || '');
+                if (parsed?.file?.startsWith('__qqaw_chat_') && message.original_avatar) {
+                    message.extra[MESSAGE_ORIGINAL_FORCE_FIELD] = `/User%20Avatars/${encodeURIComponent(message.original_avatar)}`;
+                } else {
+                    message.extra[MESSAGE_ORIGINAL_FORCE_FIELD] = currentForce;
+                }
+            }
             if (message.force_avatar !== avatarUrl) {
                 message.force_avatar = avatarUrl;
                 changed += 1;
@@ -1206,29 +1203,89 @@
         }
 
         if (changed) await saveCurrentChatNow();
+
+        // 同步当前 DOM，并把 force_avatar 标记设为 true，避免 ST 的 reloadUserAvatar
+        // 把这些消息重新写回当前 Persona 头像。
+        document.querySelectorAll('#chat .mes[is_user="true"]:not(.template_element)').forEach((message) => {
+            message.setAttribute('force_avatar', 'true');
+            message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, avatarUrl));
+        });
         return changed;
     }
 
-    async function syncCurrentChatToPermanentPersona(target) {
-        if (target?.kind !== 'user') return;
-        const fresh = withCacheBust(directAvatarUrl(target));
-        await syncUserMessagesToAvatar(target, fresh);
-    }
+    async function restoreUserMessagesFromChatOverride() {
+        const ctx = liveContext();
+        const messages = Array.isArray(ctx.chat) ? ctx.chat : [];
+        const active = getActiveUserTarget();
+        let changed = 0;
 
+        for (const message of messages) {
+            if (!message?.is_user) continue;
+            const extra = message.extra ?? {};
+            const hasBackup = Object.prototype.hasOwnProperty.call(extra, MESSAGE_ORIGINAL_FORCE_FIELD);
+            const currentParsed = parseAvatarRef(message.force_avatar || '');
+            if (!hasBackup && !currentParsed?.file?.startsWith('__qqaw_chat_')) continue;
+
+            let restored = hasBackup ? extra[MESSAGE_ORIGINAL_FORCE_FIELD] : null;
+            if (!restored && message.original_avatar) {
+                restored = `/User%20Avatars/${encodeURIComponent(message.original_avatar)}`;
+            }
+            if (!restored && active?.key) {
+                restored = `/User%20Avatars/${encodeURIComponent(active.key)}`;
+            }
+
+            if (restored) message.force_avatar = restored;
+            else delete message.force_avatar;
+            if (hasBackup) delete extra[MESSAGE_ORIGINAL_FORCE_FIELD];
+            message.extra = extra;
+            changed += 1;
+        }
+
+        if (changed) await saveCurrentChatNow();
+        return changed;
+    }
+    async function syncCurrentChatToPermanentPersona(target) {
+        if (target?.kind !== 'user' || !target.key) return;
+        const ctx = liveContext();
+        const fresh = withCacheBust(directAvatarUrl(target));
+        let changed = 0;
+        for (const message of (Array.isArray(ctx.chat) ? ctx.chat : [])) {
+            if (!message?.is_user) continue;
+            message.extra ??= {};
+            delete message.extra[MESSAGE_ORIGINAL_FORCE_FIELD];
+            message.original_avatar = target.key;
+            message.force_avatar = fresh;
+            changed += 1;
+        }
+        if (changed) await saveCurrentChatNow();
+
+        document.querySelectorAll('#chat .mes[is_user="true"]:not(.template_element)').forEach((message) => {
+            message.setAttribute('force_avatar', 'true');
+            message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, fresh));
+        });
+    }
     async function migrateLegacyChatOverrideStore() {
         const store = getChatOverrideStore(false);
         if (!store) return false;
         const version = Number(store.version || 1);
         if (version >= CHAT_STORE_VERSION) return false;
 
-        const hadLegacyOverride = Object.keys(store.overrides || {}).length > 0;
-        // v0.1.4-v0.1.8 只在 DOM 层强压头像，容易留下“旧临时头像锁死”的状态。
-        // v2 改为写入 SillyTavern 自己的 message.force_avatar，因此旧活动覆盖不迁移，
-        // 首次升级主动清空一次，让当前聊天先恢复 Persona 的真实状态。
+        const userOverrides = Object.values(store.overrides || {})
+            .filter((item) => item?.kind === 'user' && item.file)
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+        const activeOverride = userOverrides[0] || null;
+
         store.version = CHAT_STORE_VERSION;
-        store.overrides = {};
+        store.overrides = activeOverride ? { 'user:__chat__': activeOverride } : {};
         await persistChatMetadata({ flush: true });
-        return hadLegacyOverride;
+
+        if (activeOverride) {
+            // 旧版可能只成功改了部分 USER 消息。升级时把同一聊天中的所有 USER
+            // 消息统一套用当前临时头像，彻底摆脱“某一张旧 Persona 图反复跳回来”。
+            await syncUserMessagesToAvatar(getActiveUserTarget(activeOverride.targetName || ''), chatOverrideUrl(activeOverride));
+            return true;
+        }
+        return false;
     }
 
     async function persistChatMetadata({ flush = false } = {}) {
@@ -1254,26 +1311,43 @@
 
         if (typeof ctx.saveChat === 'function') await ctx.saveChat();
     }
-
     async function setChatOverride(target, file) {
         if (target?.kind !== 'user') throw new Error('CHAR 头像不支持“仅本次聊天”替换。');
         const store = getChatOverrideStore(true);
         if (!store) throw new Error('当前聊天 metadata 不可用，无法保存“仅本次聊天”头像。');
-        const key = overrideKeyForTarget(target);
         const record = {
-            kind: target.kind,
-            targetKey: target.key || '',
-            targetName: target.name || '',
-            charId: target.charId,
+            kind: 'user',
+            targetKey: target.key || getActivePersonaId() || '',
+            targetName: target.name || liveContext().name1 || '',
+            charId: null,
             file,
             createdAt: Date.now(),
         };
-        store.overrides[key] = record;
+        // 一个聊天只维护一个 USER 临时头像覆盖。
+        Object.keys(store.overrides || {}).forEach((key) => {
+            if (store.overrides[key]?.kind === 'user') delete store.overrides[key];
+        });
+        store.overrides['user:__chat__'] = record;
         await persistChatMetadata({ flush: true });
         return record;
     }
-
     async function clearChatOverride(target) {
+        if (target?.kind === 'user') {
+            const store = getChatOverrideStore(false);
+            let changed = false;
+            if (store?.overrides) {
+                for (const [key, item] of Object.entries(store.overrides)) {
+                    if (item?.kind === 'user') {
+                        delete store.overrides[key];
+                        changed = true;
+                    }
+                }
+            }
+            await restoreUserMessagesFromChatOverride();
+            if (changed) await persistChatMetadata({ flush: true });
+            return;
+        }
+
         const store = getChatOverrideStore(false);
         if (!store?.overrides) return;
         let changed = false;
@@ -1281,7 +1355,7 @@
             if (!item || item.kind !== target.kind) continue;
             const matches = key === overrideKeyForTarget(target)
                 || (item.targetKey && target.key && item.targetKey === target.key)
-                || (target.kind === 'char' && item.charId != null && target.charId != null && Number(item.charId) === Number(target.charId))
+                || (item.charId != null && target.charId != null && Number(item.charId) === Number(target.charId))
                 || (item.targetName && target.name && item.targetName === target.name);
             if (matches) {
                 delete store.overrides[key];
@@ -1290,24 +1364,9 @@
         }
         if (changed) await persistChatMetadata({ flush: true });
     }
-
     function findChatOverrideForMessage(message) {
-        if (!message) return null;
-        const isUser = message.getAttribute('is_user') === 'true';
-        // 聊天级头像只支持 USER，忽略旧版本可能遗留的 CHAR 临时覆盖。
-        if (!isUser) return null;
-        const kind = 'user';
-        const name = message.querySelector('.name_text')?.textContent?.trim() || '';
-        const parsed = parseAvatarRef(message.querySelector('.avatar img')?.src);
-        const overrides = allChatOverrides();
-        return overrides.find((item) => {
-            if (!item || item.kind !== kind) return false;
-            if (message.dataset.qqawOriginalKey && item.targetKey === message.dataset.qqawOriginalKey) return true;
-            if (parsed?.file && !parsed.file.startsWith('__qqaw_chat_')) {
-                return Boolean(item.targetKey && parsed.file === item.targetKey);
-            }
-            return Boolean(item.targetName && name && item.targetName === name);
-        }) || null;
+        if (!message || message.getAttribute('is_user') !== 'true') return null;
+        return getChatOverrideForTarget({ kind: 'user' });
     }
 
     function imageUsesChatOverride(img, override) {
@@ -1317,19 +1376,15 @@
         const hasResponsiveSource = Boolean(img.getAttribute('srcset') || picture?.querySelector?.('source[srcset]'));
         return parsed?.file === override.file && !hasResponsiveSource;
     }
-
     function applyChatOverrideToMessage(message) {
         const override = findChatOverrideForMessage(message);
         if (!override) return false;
-        message.dataset.qqawOriginalKind = override.kind;
+        const fresh = chatOverrideUrl(override);
+        message.setAttribute('force_avatar', 'true');
+        message.dataset.qqawOriginalKind = 'user';
         message.dataset.qqawOriginalKey = override.targetKey || '';
         message.dataset.qqawOriginalName = override.targetName || '';
-        message.dataset.qqawOriginalCharId = override.charId == null ? '' : String(override.charId);
-        const fresh = chatOverrideUrl(override);
         message.querySelectorAll('.avatar img').forEach((img) => {
-            // SillyTavern / 某些主题会在消息完成渲染后再次写回 Persona 永久头像。
-            // 只有当当前实际显示源不是聊天级头像（或又出现 srcset）时才重写，
-            // 这样既能持续守住临时头像，也不会和 MutationObserver 自己形成死循环。
             if (!imageUsesChatOverride(img, override)) setFreshImageSource(img, fresh);
         });
         return true;
@@ -1353,18 +1408,12 @@
         requestAnimationFrame(run);
         [40, 120, 300, 700, 1400].forEach((delay) => setTimeout(run, delay));
     }
-
     function refreshChatScopedOverride(target) {
-        const override = getChatOverrideForTarget(target);
+        if (target?.kind !== 'user') return;
+        const override = getChatOverrideForTarget({ kind: 'user' });
         if (!override) return;
-        document.querySelectorAll('#chat .mes:not(.template_element)').forEach((message) => {
-            const candidate = getTargetFromMessage(message);
-            const same = candidate?.kind === target.kind && (
-                (candidate.key && target.key && candidate.key === target.key)
-                || (candidate.name && target.name && candidate.name === target.name)
-                || (target.kind === 'char' && candidate.charId != null && target.charId != null && candidate.charId === target.charId)
-            );
-            if (same) applyChatOverrideToMessage(message);
+        document.querySelectorAll('#chat .mes[is_user="true"]:not(.template_element)').forEach((message) => {
+            applyChatOverrideToMessage(message);
         });
     }
 
@@ -2031,13 +2080,13 @@
             ? `/User%20Avatars/${encodeURIComponent(target.key)}`
             : `/characters/${encodeURIComponent(target.key)}`;
     }
-
     function messageMatchesAvatarTarget(message, target) {
         if (!message || !target) return false;
+        if (target.kind === 'user') return message.getAttribute('is_user') === 'true';
         const candidate = getTargetFromMessage(message);
         if (!candidate || candidate.kind !== target.kind) return false;
         if (candidate.key && target.key && candidate.key === target.key) return true;
-        if (target.kind === 'char' && candidate.charId != null && target.charId != null && candidate.charId === target.charId) return true;
+        if (candidate.charId != null && target.charId != null && candidate.charId === target.charId) return true;
         return Boolean(candidate.name && target.name && candidate.name === target.name);
     }
 
@@ -2230,7 +2279,6 @@
         setAllWorkbenchIcons(DEFAULT_ICON_URL);
         notify('success', '已恢复丘丘头像工作台默认图标。');
     }
-
     function bindSillyTavernEvents() {
         const source = context.eventSource;
         const types = context.eventTypes ?? context.event_types;
@@ -2250,6 +2298,7 @@
             types.PERSONA_UPDATED,
             types.MESSAGE_RECEIVED,
             types.MESSAGE_UPDATED,
+            types.USER_MESSAGE_RENDERED,
         ].filter(Boolean).forEach((eventName) => source.on(eventName, refresh));
 
         if (types.MESSAGE_SENT) {
@@ -2263,18 +2312,12 @@
                         return;
                     }
 
-                    // 新发出的 USER 消息会由 ST 先写入 Persona 永久 force_avatar。
-                    // 当前聊天若启用了临时头像，在消息数据层立即改成聊天级头像。
-                    const overrides = allChatOverrides().filter((item) => item?.kind === 'user');
-                    const override = overrides.find((item) => {
-                        if (item.targetKey && message.original_avatar === item.targetKey) return true;
-                        const parsed = parseAvatarRef(message.force_avatar || '');
-                        if (item.targetKey && parsed?.file === item.targetKey) return true;
-                        return Boolean(item.targetName && message.name && item.targetName === message.name);
-                    }) || (overrides.length === 1 ? overrides[0] : null);
-
+                    const override = getChatOverrideForTarget({ kind: 'user' });
                     if (override) {
-                        message.original_avatar = override.targetKey || message.original_avatar || '';
+                        message.extra ??= {};
+                        if (!Object.prototype.hasOwnProperty.call(message.extra, MESSAGE_ORIGINAL_FORCE_FIELD)) {
+                            message.extra[MESSAGE_ORIGINAL_FORCE_FIELD] = message.force_avatar ?? null;
+                        }
                         message.force_avatar = chatOverrideUrl(override);
                         await saveCurrentChatNow();
                     }
@@ -2350,9 +2393,9 @@
                     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                     scanMessages(document);
                 }
-                notify('info', '已清理旧版临时头像锁定状态。需要临时头像时请重新设置一次。');
+                notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.1.9 已加载');
+            console.info('[丘丘头像工作台] v0.2.0 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

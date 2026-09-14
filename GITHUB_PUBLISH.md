@@ -1,20 +1,23 @@
-# 丘丘头像工作台：Git URL 安装发布说明
+# 发布 v0.2.0
 
-仓库根目录必须直接看到：
-- manifest.json
-- index.js
-- style.css
-- README.md
-- LICENSE
+将本目录中的文件上传并覆盖到：
 
-不要把这些文件再套一层 `qiuqiu-avatar-workbench/` 文件夹上传到仓库。
+`https://github.com/yukisnowww61-rgb/qiuqiu-avatar-workbench`
 
-## GitHub 网页发布
-1. 新建一个 Public repository，例如 `qiuqiu-avatar-workbench`。
-2. 进入仓库，选择 Add file → Upload files。
-3. 将本目录中的所有文件上传到仓库根目录并 Commit changes。
-4. 复制仓库地址，例如：`https://github.com/你的用户名/qiuqiu-avatar-workbench`
-5. SillyTavern → 扩展 → 安装扩展 → 粘贴该 Git URL。
-6. 分支留空即可使用仓库默认分支；通常选择“仅为我安装”即可。
+至少覆盖：
 
-以后更新扩展时，只需在 GitHub 仓库替换代码，并修改 `manifest.json` 中的 version，例如从 `0.1.0` 改为 `0.1.1`。
+- `index.js`
+- `manifest.json`
+- `README.md`
+
+`style.css` 本版没有核心逻辑变化，但直接整包覆盖也可以。
+
+建议提交信息：
+
+```text
+fix: v0.2.0 use force_avatar for chat-scoped persona avatars
+```
+
+更新后在 TauriTavern / SillyTavern 的“管理扩展”中更新丘丘头像工作台，然后刷新页面。
+
+> 注意：v0.2.0 会一次性清理 v0.1.4–v0.1.8 保存的旧 USER 临时头像覆盖状态。升级后如果仍需聊天临时头像，请重新设置一次。
