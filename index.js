@@ -1163,12 +1163,27 @@
         return `${base}?qqawchat=${encodeURIComponent(override.createdAt || Date.now())}`;
     }
 
-    async function persistChatMetadata() {
+    async function persistChatMetadata({ flush = false } = {}) {
         const ctx = liveContext();
-        if (typeof ctx.saveMetadataDebounced === 'function') {
-            await ctx.saveMetadataDebounced();
+
+        // 新版 ST / 部分宿主会暴露真正可 await 的 saveMetadata。优先用它，
+        // 这样在 reloadCurrentChat 之前可以确保聊天 metadata 已经落盘。
+        if (typeof ctx.saveMetadata === 'function') {
+            await ctx.saveMetadata();
             return;
         }
+
+        // saveMetadataDebounced() 只是安排稍后的保存，本身通常返回 void。
+        // 如果后面马上要 reloadCurrentChat，就必须等过 debounce 窗口，
+        // 否则 reload 会把磁盘中的旧 metadata 再读回来。
+        if (typeof ctx.saveMetadataDebounced === 'function') {
+            ctx.saveMetadataDebounced();
+            if (flush) {
+                await new Promise((resolve) => setTimeout(resolve, 1150));
+            }
+            return;
+        }
+
         if (typeof ctx.saveChat === 'function') await ctx.saveChat();
     }
 
@@ -1186,7 +1201,7 @@
             createdAt: Date.now(),
         };
         store.overrides[key] = record;
-        await persistChatMetadata();
+        await persistChatMetadata({ flush: true });
         return record;
     }
 
@@ -1205,13 +1220,13 @@
                 changed = true;
             }
         }
-        if (changed) await persistChatMetadata();
+        if (changed) await persistChatMetadata({ flush: true });
     }
 
     function findChatOverrideForMessage(message) {
         if (!message) return null;
         const isUser = message.getAttribute('is_user') === 'true';
-        // v0.1.6 起聊天级头像只支持 USER，忽略旧版本可能遗留的 CHAR 临时覆盖。
+        // v0.1.7 起聊天级头像只支持 USER，忽略旧版本可能遗留的 CHAR 临时覆盖。
         if (!isUser) return null;
         const kind = 'user';
         const name = message.querySelector('.name_text')?.textContent?.trim() || '';
@@ -1284,7 +1299,12 @@
         if (target?.kind !== 'user') throw new Error('CHAR 头像不支持“仅本次聊天”替换。');
         const chatIdentity = getCurrentChatIdentity();
         const suffix = hashString(`${target.kind}|${target.key}|${target.name}`);
-        const file = `__qqaw_chat_${hashString(chatIdentity)}_${suffix}.${avatarExtension(blob)}`;
+
+        // 每一次聊天级替换都使用全新的文件名。
+        // 不能继续覆盖同一个 __qqaw_chat_ 文件，否则 WebView / 图片缓存层可能
+        // 在第二次替换后仍然返回第一次的内容，即使 query string 已变化。
+        const revision = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const file = `__qqaw_chat_${hashString(chatIdentity)}_${suffix}_${revision}.${avatarExtension(blob)}`;
         const formData = new FormData();
         formData.append('avatar', avatarUploadFile(blob, 'qiuqiu-chat-avatar'));
         formData.append('overwrite_name', file);
@@ -1295,6 +1315,8 @@
             cache: 'no-cache',
         });
         if (!response.ok) throw new Error(`本次聊天头像上传失败（HTTP ${response.status}）。`);
+
+        // 先写入聊天 metadata，并等它真正落盘，再允许后续 reloadCurrentChat。
         const record = await setChatOverride(target, file);
         refreshChatScopedOverride(target);
         setTimeout(() => refreshChatScopedOverride(target), 80);
