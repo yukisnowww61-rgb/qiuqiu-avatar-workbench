@@ -1242,6 +1242,14 @@
         }) || null;
     }
 
+    function imageUsesChatOverride(img, override) {
+        if (!img || !override?.file) return false;
+        const parsed = parseAvatarRef(img.currentSrc || img.src);
+        const picture = img.closest?.('picture');
+        const hasResponsiveSource = Boolean(img.getAttribute('srcset') || picture?.querySelector?.('source[srcset]'));
+        return parsed?.file === override.file && !hasResponsiveSource;
+    }
+
     function applyChatOverrideToMessage(message) {
         const override = findChatOverrideForMessage(message);
         if (!override) return false;
@@ -1250,7 +1258,12 @@
         message.dataset.qqawOriginalName = override.targetName || '';
         message.dataset.qqawOriginalCharId = override.charId == null ? '' : String(override.charId);
         const fresh = chatOverrideUrl(override);
-        message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, fresh));
+        message.querySelectorAll('.avatar img').forEach((img) => {
+            // SillyTavern / 某些主题会在消息完成渲染后再次写回 Persona 永久头像。
+            // 只有当当前实际显示源不是聊天级头像（或又出现 srcset）时才重写，
+            // 这样既能持续守住临时头像，也不会和 MutationObserver 自己形成死循环。
+            if (!imageUsesChatOverride(img, override)) setFreshImageSource(img, fresh);
+        });
         return true;
     }
 
@@ -1260,6 +1273,17 @@
             if (message.classList.contains('template_element') || message.id === 'message_template') return;
             applyChatOverrideToMessage(message);
         });
+    }
+
+    function scheduleChatOverrideReapply() {
+        // CHAT_CHANGED / Persona 刷新后，ST 的消息头像可能分多轮完成渲染。
+        // 多个短延迟 + 属性观察器共同保证最后一轮写回也会被纠正。
+        const run = () => {
+            applyChatScopedOverrides(document);
+            refreshAllAvatarLayouts(document);
+        };
+        requestAnimationFrame(run);
+        [40, 120, 300, 700, 1400].forEach((delay) => setTimeout(run, delay));
     }
 
     function refreshChatScopedOverride(target) {
@@ -1522,7 +1546,7 @@
                     await uploadCharacterAvatar(state.target, record.blob);
                 }
             }
-            await forceCurrentChatAvatarRefresh(state.target);
+            await forceCurrentChatAvatarRefresh(state.target, { reload: record.scope !== 'chat' || record.wasChatOverride === false });
             await loadTargetImage(true);
             await renderHistory();
             notify('success', `已回滚到 ${formatHistoryTime(record.createdAt)} 的头像。`);
@@ -1869,7 +1893,7 @@
             state.file = null;
             state.sourceKind = 'current';
             revokeObjectUrl();
-            await forceCurrentChatAvatarRefresh(state.target);
+            await forceCurrentChatAvatarRefresh(state.target, { reload: state.replaceScope !== 'chat' });
             await loadTargetImage(true);
             applyChatScopedOverrides(document);
             refreshAllAvatarLayouts(document);
@@ -1891,23 +1915,34 @@
         }
     }
 
-    async function forceCurrentChatAvatarRefresh(target) {
+    async function forceCurrentChatAvatarRefresh(target, { reload = true } = {}) {
         const ctx = liveContext();
         const chat = document.querySelector('#chat');
         const distanceFromBottom = chat ? Math.max(0, chat.scrollHeight - chat.scrollTop - chat.clientHeight) : null;
-        try {
-            if (typeof ctx.reloadCurrentChat === 'function') {
-                await ctx.reloadCurrentChat();
+
+        // 聊天级 USER 头像不再主动 reloadCurrentChat：重载本身会触发 ST 再写一次
+        // Persona 永久头像，从而造成“临时头像闪一下又变回永久头像”。
+        // 永久替换仍可使用 ST 的标准聊天重载流程。
+        if (reload) {
+            try {
+                if (typeof ctx.reloadCurrentChat === 'function') {
+                    await ctx.reloadCurrentChat();
+                }
+            } catch (error) {
+                console.warn('[丘丘头像工作台] reloadCurrentChat 失败，回退到 DOM 强制刷新。', error);
             }
-        } catch (error) {
-            console.warn('[丘丘头像工作台] reloadCurrentChat 失败，回退到 DOM 强制刷新。', error);
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        } else {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
         }
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
         applyChatScopedOverrides(document);
         refreshLiveAvatar(target);
         scanMessages(document);
+        scheduleChatOverrideReapply();
+
         const nextChat = document.querySelector('#chat');
-        if (nextChat && distanceFromBottom != null) {
+        if (reload && nextChat && distanceFromBottom != null) {
             nextChat.scrollTop = Math.max(0, nextChat.scrollHeight - nextChat.clientHeight - distanceFromBottom);
         }
         setTimeout(() => {
@@ -2128,7 +2163,12 @@
         const types = context.eventTypes ?? context.event_types;
         if (!source?.on || !types) return;
 
-        const refresh = () => setTimeout(() => scanMessages(document), 0);
+        const refresh = () => {
+            setTimeout(() => {
+                scanMessages(document);
+                scheduleChatOverrideReapply();
+            }, 0);
+        };
         [
             types.CHAT_CHANGED,
             types.CHARACTER_EDITED,
@@ -2143,14 +2183,38 @@
     function startObserver() {
         const root = document.querySelector('#chat') || document.body;
         observer = new MutationObserver((mutations) => {
+            const messagesToReapply = new Set();
             for (const mutation of mutations) {
-                mutation.addedNodes.forEach((node) => {
-                    if (!(node instanceof Element)) return;
-                    scanMessages(node);
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach((node) => {
+                        if (!(node instanceof Element)) return;
+                        scanMessages(node);
+                    });
+                    continue;
+                }
+
+                // 关键修复：ST / 主题可能在消息已经存在后，再异步修改头像的
+                // src / srcset。旧版只监听 addedNodes，因此最后一次写回永久头像
+                // 无法被发现。现在属性变化也会触发对应消息的临时头像重应用。
+                if (mutation.type === 'attributes') {
+                    const element = mutation.target instanceof Element ? mutation.target : null;
+                    const message = element?.closest?.('.mes');
+                    if (message?.getAttribute('is_user') === 'true') messagesToReapply.add(message);
+                }
+            }
+
+            if (messagesToReapply.size) {
+                queueMicrotask(() => {
+                    messagesToReapply.forEach((message) => applyChatOverrideToMessage(message));
                 });
             }
         });
-        observer.observe(root, { childList: true, subtree: true });
+        observer.observe(root, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src', 'srcset'],
+        });
     }
 
     async function waitForSillyTavern() {
@@ -2171,7 +2235,7 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.6 已加载');
+            console.info('[丘丘头像工作台] v0.1.8 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
