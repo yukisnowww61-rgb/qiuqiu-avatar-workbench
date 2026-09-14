@@ -70,6 +70,7 @@
             launcherGap: 2,
             replaceScope: 'permanent',
             modalRect: null,
+            previewLayout: 'vertical',
         };
     }
 
@@ -80,6 +81,7 @@
         settings.characterLayouts ??= {};
         settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
         settings.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
+        settings.previewLayout = settings.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
         context.extensionSettings[MODULE_ID] = settings;
     }
 
@@ -646,26 +648,38 @@
 
                     <div class="qqaw-main-grid">
                         <section class="qqaw-preview-panel">
-                            <div id="qqaw-preview-shell" class="qqaw-preview-shell" style="--qqaw-aspect-w:2;--qqaw-aspect-h:3;">
-                                <canvas id="qqaw-preview-canvas" aria-label="头像裁剪预览"></canvas>
-                                <img id="qqaw-preview-img" alt="" draggable="false" hidden />
-                                <div class="qqaw-preview-hint">拖动调整位置 · 滚轮/双指缩放</div>
-                            </div>
-                            <div class="qqaw-upload-row">
-                                <button type="button" id="qqaw-pick-image" class="menu_button">选择新图片</button>
-                                <input id="qqaw-file-input" type="file" accept="image/*" hidden />
-                                <button type="button" id="qqaw-use-current" class="menu_button">重新载入当前头像</button>
+                            <div class="qqaw-preview-layout-toolbar">
+                                <span class="qqaw-preview-layout-label">预览排版</span>
+                                <div class="qqaw-preview-layout-switch" role="group" aria-label="预览排版">
+                                    <button type="button" class="qqaw-preview-layout-button" data-preview-layout="vertical">竖向</button>
+                                    <button type="button" class="qqaw-preview-layout-button" data-preview-layout="horizontal">横向</button>
+                                </div>
                             </div>
 
-                            <div class="qqaw-theme-preview-block">
-                                <div class="qqaw-mini-head">
-                                    <span>当前头像框预览</span>
-                                    <span class="qqaw-live-badge">LIVE</span>
+                            <div id="qqaw-preview-stack" class="qqaw-preview-stack">
+                                <div class="qqaw-crop-preview-block">
+                                    <div id="qqaw-preview-shell" class="qqaw-preview-shell" style="--qqaw-aspect-w:2;--qqaw-aspect-h:3;">
+                                        <canvas id="qqaw-preview-canvas" aria-label="头像裁剪预览"></canvas>
+                                        <img id="qqaw-preview-img" alt="" draggable="false" hidden />
+                                        <div class="qqaw-preview-hint">拖动调整位置 · 滚轮/双指缩放</div>
+                                    </div>
+                                    <div class="qqaw-upload-row">
+                                        <button type="button" id="qqaw-pick-image" class="menu_button">选择新图片</button>
+                                        <input id="qqaw-file-input" type="file" accept="image/*" hidden />
+                                        <button type="button" id="qqaw-use-current" class="menu_button">重新载入当前头像</button>
+                                    </div>
                                 </div>
-                                <div id="qqaw-theme-preview-viewport" class="qqaw-theme-preview-viewport">
-                                    <div id="qqaw-theme-preview-empty" class="qqaw-theme-preview-empty">正在读取当前聊天的头像框…</div>
+
+                                <div class="qqaw-theme-preview-block">
+                                    <div class="qqaw-mini-head">
+                                        <span>当前头像框预览</span>
+                                        <span class="qqaw-live-badge">LIVE</span>
+                                    </div>
+                                    <div id="qqaw-theme-preview-viewport" class="qqaw-theme-preview-viewport">
+                                        <div id="qqaw-theme-preview-empty" class="qqaw-theme-preview-empty">正在读取当前聊天的头像框…</div>
+                                    </div>
+                                    <div class="qqaw-small-note">镜像当前聊天中同类型消息的真实头像位置、遮罩、滤镜与头像框。拖动或缩放左侧/上方图片时，这里会同步预览最终效果，但不会改动聊天内容。</div>
                                 </div>
-                                <div class="qqaw-small-note">镜像当前聊天中同类型消息的真实头像位置、遮罩、滤镜与头像框。拖动或缩放上方图片时，这里会同步预览最终效果，但不会改动聊天内容。</div>
                             </div>
                         </section>
 
@@ -857,11 +871,34 @@
             themePreviewResizeObserver = new ResizeObserver(() => scheduleThemePreview());
             themePreviewResizeObserver.observe(themeViewport);
         }
+        modal.querySelectorAll('.qqaw-preview-layout-button').forEach((button) => {
+            button.addEventListener('click', () => {
+                settings.previewLayout = button.dataset.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
+                saveSettings();
+                syncPreviewLayoutUi();
+                requestAnimationFrame(() => scheduleThemePreview());
+            });
+        });
         $('#qqaw-launcher-gap').addEventListener('input', () => {
             settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
             $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
             saveSettings();
             updateLauncherPositions();
+        });
+    }
+
+    function syncPreviewLayoutUi() {
+        if (!modal) return;
+        const layout = settings.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
+        const stack = modal.querySelector('#qqaw-preview-stack');
+        if (stack) {
+            stack.classList.toggle('qqaw-preview-horizontal', layout === 'horizontal');
+            stack.classList.toggle('qqaw-preview-vertical', layout !== 'horizontal');
+        }
+        modal.querySelectorAll('.qqaw-preview-layout-button').forEach((button) => {
+            const active = button.dataset.previewLayout === layout;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
     }
 
@@ -1078,6 +1115,7 @@
         modal.querySelector('#qqaw-gap-value').value = `${settings.launcherGap ?? 2} px`;
         syncTargetUi();
         syncReplaceScopeUi();
+        syncPreviewLayoutUi();
         const shell = modal.querySelector('#qqaw-preview-shell');
         shell.style.setProperty('--qqaw-aspect-w', 2);
         shell.style.setProperty('--qqaw-aspect-h', 3);
