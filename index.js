@@ -26,6 +26,7 @@
     const launcherMap = new Map();
     const historyObjectUrls = new Set();
     let historyDbPromise = null;
+    let userDisplayRevision = Date.now();
     let state = createInitialState();
 
     function createInitialState() {
@@ -606,6 +607,7 @@
             createNameButton(message);
         });
         applyChatScopedOverrides(root);
+        syncProtectedUserAvatarLayers(root);
         refreshAllAvatarLayouts(root);
         scheduleLauncherPositions();
     }
@@ -1379,14 +1381,13 @@
     function applyChatOverrideToMessage(message) {
         const override = findChatOverrideForMessage(message);
         if (!override) return false;
-        const fresh = chatOverrideUrl(override);
         message.setAttribute('force_avatar', 'true');
         message.dataset.qqawOriginalKind = 'user';
         message.dataset.qqawOriginalKey = override.targetKey || '';
         message.dataset.qqawOriginalName = override.targetName || '';
-        message.querySelectorAll('.avatar img').forEach((img) => {
-            if (!imageUsesChatOverride(img, override)) setFreshImageSource(img, fresh);
-        });
+        // v0.2.1：不再和 ST / AvatarDeblur 争抢原始 .avatar img 的 src。
+        // 真正显示的头像由独立保护层负责，原 img 只作为布局参考。
+        ensureProtectedUserAvatar(message);
         return true;
     }
 
@@ -1403,6 +1404,7 @@
         // 多个短延迟 + 属性观察器共同保证最后一轮写回也会被纠正。
         const run = () => {
             applyChatScopedOverrides(document);
+            syncProtectedUserAvatarLayers(document);
             refreshAllAvatarLayouts(document);
         };
         requestAnimationFrame(run);
@@ -1414,6 +1416,114 @@
         if (!override) return;
         document.querySelectorAll('#chat .mes[is_user="true"]:not(.template_element)').forEach((message) => {
             applyChatOverrideToMessage(message);
+            ensureProtectedUserAvatar(message);
+        });
+    }
+
+    function currentUserDisplayUrl() {
+        const override = getChatOverrideForTarget({ kind: 'user' });
+        if (override?.file) return chatOverrideUrl(override);
+        const target = getActiveUserTarget();
+        const direct = directAvatarUrl(target);
+        if (!direct) return '';
+        const separator = direct.includes('?') ? '&' : '?';
+        return `${direct}${separator}qqawdisplay=${encodeURIComponent(userDisplayRevision)}`;
+    }
+
+    function copyProtectedAvatarStyle(base, layer, message) {
+        if (!base?.isConnected || !layer?.isConnected || !message?.isConnected) return;
+        const baseRect = base.getBoundingClientRect();
+        const messageRect = message.getBoundingClientRect();
+        if (!baseRect.width || !baseRect.height) return;
+        const cs = getComputedStyle(base);
+
+        const important = (name, value) => {
+            if (value != null && value !== '') layer.style.setProperty(name, value, 'important');
+        };
+        important('position', 'absolute');
+        important('left', `${baseRect.left - messageRect.left}px`);
+        important('top', `${baseRect.top - messageRect.top}px`);
+        important('width', `${baseRect.width}px`);
+        important('height', `${baseRect.height}px`);
+        important('margin', '0');
+        important('transform', 'none');
+        important('transform-origin', 'center center');
+        important('object-fit', cs.objectFit || 'cover');
+        important('object-position', cs.objectPosition || '50% 50%');
+        important('border-radius', cs.borderRadius);
+        important('border-top', cs.borderTop);
+        important('border-right', cs.borderRight);
+        important('border-bottom', cs.borderBottom);
+        important('border-left', cs.borderLeft);
+        important('box-shadow', cs.boxShadow);
+        important('opacity', cs.opacity);
+        important('filter', cs.filter);
+        important('clip-path', cs.clipPath);
+        important('-webkit-clip-path', cs.webkitClipPath || cs.clipPath);
+        important('mask-image', cs.maskImage);
+        important('-webkit-mask-image', cs.webkitMaskImage || cs.maskImage);
+        important('mask-size', cs.maskSize);
+        important('-webkit-mask-size', cs.webkitMaskSize || cs.maskSize);
+        important('mask-position', cs.maskPosition);
+        important('-webkit-mask-position', cs.webkitMaskPosition || cs.maskPosition);
+        important('mask-repeat', cs.maskRepeat);
+        important('-webkit-mask-repeat', cs.webkitMaskRepeat || cs.maskRepeat);
+        important('pointer-events', 'none');
+        important('z-index', '0');
+        important('visibility', 'visible');
+
+        // 原始头像仍留在 DOM 中供 SillyTavern / AvatarDeblur 自己操作，
+        // 但显示层将它遮住。visibility 不参与布局，所以不会改变主题几何。
+        base.style.setProperty('visibility', 'hidden', 'important');
+        base.dataset.qqawProtectedHidden = 'true';
+    }
+
+    function ensureProtectedUserAvatar(message) {
+        if (!message || message.getAttribute('is_user') !== 'true' || message.classList.contains('template_element')) return null;
+        const avatar = message.querySelector('.avatar');
+        const base = avatar?.querySelector('img:not(.qqaw-protected-user-avatar)');
+        if (!avatar || !base) return null;
+        const desired = currentUserDisplayUrl();
+        if (!desired) return null;
+
+        let layer = message.querySelector(':scope > .qqaw-protected-user-avatar');
+        if (!layer) {
+            layer = document.createElement('img');
+            layer.className = 'qqaw-protected-user-avatar';
+            layer.alt = '';
+            layer.draggable = false;
+            layer.decoding = 'async';
+            layer.setAttribute('aria-hidden', 'true');
+            message.append(layer);
+        }
+
+        if (layer.dataset.qqawDesiredUrl !== desired) {
+            layer.dataset.qqawDesiredUrl = desired;
+            layer.removeAttribute('srcset');
+            layer.src = desired;
+        }
+        copyProtectedAvatarStyle(base, layer, message);
+        const target = getActiveUserTarget();
+        const layout = target?.key ? getSavedLayout(target) : null;
+        applyLayoutToImage(layer, layout);
+        return layer;
+    }
+
+    function syncProtectedUserAvatarLayers(root = document) {
+        const messages = root.matches?.('.mes') ? [root] : [...root.querySelectorAll?.('#chat .mes, .mes') ?? []];
+        messages.forEach((message) => {
+            if (message.getAttribute?.('is_user') === 'true' && !message.classList.contains('template_element')) {
+                ensureProtectedUserAvatar(message);
+            }
+        });
+    }
+
+    function releaseProtectedUserAvatar(message) {
+        if (!message) return;
+        message.querySelector(':scope > .qqaw-protected-user-avatar')?.remove();
+        message.querySelectorAll('.avatar img[data-qqaw-protected-hidden="true"]').forEach((img) => {
+            img.style.removeProperty('visibility');
+            delete img.dataset.qqawProtectedHidden;
         });
     }
 
@@ -1456,6 +1566,7 @@
             cache: 'no-cache',
         });
         if (!response.ok) throw new Error(`本次聊天头像上传失败（HTTP ${response.status}）。`);
+        userDisplayRevision = Date.now();
 
         // 先写入聊天 metadata，并等它真正落盘，再允许后续 reloadCurrentChat。
         const record = await setChatOverride(target, file);
@@ -2059,6 +2170,7 @@
         }
 
         applyChatScopedOverrides(document);
+        syncProtectedUserAvatarLayers(document);
         refreshLiveAvatar(target);
         scanMessages(document);
         scheduleChatOverrideReapply();
@@ -2121,7 +2233,10 @@
 
         target.sourceUrl = fresh;
         state.sourceUrl = fresh;
-        requestAnimationFrame(() => refreshAllAvatarLayouts(document));
+        requestAnimationFrame(() => {
+            syncProtectedUserAvatarLayers(document);
+            refreshAllAvatarLayouts(document);
+        });
         return fresh;
     }
 
@@ -2146,6 +2261,8 @@
         if (!response.ok) {
             throw new Error(`Persona 头像上传失败（HTTP ${response.status}）。`);
         }
+        userDisplayRevision = Date.now();
+        syncProtectedUserAvatarLayers(document);
 
         scheduleLiveAvatarRefresh(target);
         await context.eventSource?.emit?.(context.eventTypes?.PERSONA_UPDATED, target.key);
@@ -2355,7 +2472,10 @@
 
             if (messagesToReapply.size) {
                 queueMicrotask(() => {
-                    messagesToReapply.forEach((message) => applyChatOverrideToMessage(message));
+                    messagesToReapply.forEach((message) => {
+                        applyChatOverrideToMessage(message);
+                        ensureProtectedUserAvatar(message);
+                    });
                 });
             }
         });
@@ -2386,6 +2506,8 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
+            window.addEventListener('resize', () => syncProtectedUserAvatarLayers(document), { passive: true });
+            globalThis.visualViewport?.addEventListener?.('resize', () => syncProtectedUserAvatarLayers(document), { passive: true });
             if (clearedLegacyOverride) {
                 const ctx = liveContext();
                 if (typeof ctx.reloadCurrentChat === 'function') {
@@ -2395,7 +2517,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.2.0 已加载');
+            console.info('[丘丘头像工作台] v0.2.1 已加载（头像显示保护层兼容模式）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

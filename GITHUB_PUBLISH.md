@@ -1,4 +1,4 @@
-# 发布 v0.2.0
+# 发布 v0.2.1
 
 将本目录中的文件上传并覆盖到：
 
@@ -15,9 +15,9 @@
 建议提交信息：
 
 ```text
-fix: v0.2.0 use force_avatar for chat-scoped persona avatars
+fix: v0.2.1 use force_avatar for chat-scoped persona avatars
 ```
 
 更新后在 TauriTavern / SillyTavern 的“管理扩展”中更新丘丘头像工作台，然后刷新页面。
 
-> 注意：v0.2.0 会一次性清理 v0.1.4–v0.1.8 保存的旧 USER 临时头像覆盖状态。升级后如果仍需聊天临时头像，请重新设置一次。
+> 注意：v0.2.1 会一次性清理 v0.1.4–v0.1.8 保存的旧 USER 临时头像覆盖状态。升级后如果仍需聊天临时头像，请重新设置一次。
