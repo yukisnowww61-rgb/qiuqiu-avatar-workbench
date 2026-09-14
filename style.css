@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.1.7 · compact cute glass UI */
+/* 丘丘头像工作台 v0.2.2 · compact cute glass UI */
 
 .qqaw-name-button {
     appearance: none;
@@ -187,6 +187,7 @@
 }
 .qqaw-preview-panel,
 .qqaw-controls-panel,
+.qqaw-favorites-card,
 .qqaw-history-card,
 .qqaw-icon-settings {
     min-width: 0;
@@ -245,10 +246,77 @@
 .qqaw-chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
 .qqaw-upload-row { justify-content: center; margin-top: 10px; }
 
+
+.qqaw-theme-preview-block {
+    margin-top: 11px;
+    padding-top: 10px;
+    border-top: 1px solid var(--qqaw-line);
+}
+.qqaw-mini-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 7px;
+    font-size: .7rem;
+    font-weight: 740;
+}
+.qqaw-live-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 19px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    color: color-mix(in srgb, var(--qqaw-blue) 72%, var(--qqaw-ink));
+    background: color-mix(in srgb, var(--qqaw-blue) 11%, #fff 89%);
+    border: 1px solid color-mix(in srgb, var(--qqaw-blue) 24%, transparent);
+    font-size: .52rem;
+    font-weight: 820;
+    letter-spacing: .08em;
+}
+.qqaw-theme-preview-viewport {
+    position: relative;
+    width: 100%;
+    height: 172px;
+    overflow: hidden;
+    isolation: isolate;
+    border-radius: 13px;
+    border: 1px solid color-mix(in srgb, var(--qqaw-blue) 20%, var(--qqaw-line));
+    background:
+        radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--qqaw-blue) 7%, transparent), transparent 44%),
+        color-mix(in srgb, #fff 68%, transparent);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 52%);
+}
+.qqaw-theme-preview-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    text-align: center;
+    color: color-mix(in srgb, var(--qqaw-ink) 50%, transparent);
+    font-size: .64rem;
+    line-height: 1.5;
+    pointer-events: none;
+}
+.qqaw-theme-preview-message {
+    pointer-events: none !important;
+    user-select: none !important;
+}
+.qqaw-theme-preview-message * {
+    pointer-events: none !important;
+}
+.qqaw-theme-preview-avatar {
+    display: block;
+    max-width: none !important;
+    max-height: none !important;
+}
+
 #qqaw-modal .menu_button,
 .qqaw-text-button,
 .qqaw-history-rollback,
-.qqaw-history-delete {
+.qqaw-history-delete,
+.qqaw-favorite-toggle {
     appearance: none;
     -webkit-appearance: none;
     border: 1px solid var(--qqaw-line);
@@ -312,6 +380,8 @@
 }
 .qqaw-clear-chat-avatar { width: 100%; margin: 7px 0 0; opacity: .82; }
 
+.qqaw-favorites-card { margin-top: 11px; padding: 12px; }
+.qqaw-favorite-list { min-height: 74px; }
 .qqaw-history-card { margin-top: 11px; padding: 12px; }
 .qqaw-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
 .qqaw-section-kicker { color: color-mix(in srgb, var(--qqaw-pink) 74%, var(--qqaw-ink)); font-size: .55rem; font-weight: 800; letter-spacing: .12em; opacity: .78; }
@@ -339,6 +409,35 @@
     font-size: .67rem;
     text-align: center;
 }
+.qqaw-history-item.is-favorite {
+    border-color: color-mix(in srgb, var(--qqaw-pink) 38%, var(--qqaw-line));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--qqaw-pink) 7%, #fff), color-mix(in srgb, #fff 82%, transparent));
+}
+.qqaw-favorite-toggle {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 4;
+    width: 27px;
+    height: 27px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 16px;
+    line-height: 1;
+    color: color-mix(in srgb, var(--qqaw-ink) 42%, transparent);
+    background: rgb(255 255 255 / 78%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.qqaw-favorite-toggle.is-favorite {
+    color: color-mix(in srgb, var(--qqaw-pink) 82%, #d35f84 18%);
+    border-color: color-mix(in srgb, var(--qqaw-pink) 42%, transparent);
+    background: color-mix(in srgb, var(--qqaw-pink) 10%, #fff 90%);
+}
+.qqaw-favorite-toggle:active { transform: scale(.92); }
+
 .qqaw-history-item {
     scroll-snap-align: start;
     position: relative;
@@ -411,6 +510,7 @@
 @container (max-width: 650px) {
     .qqaw-main-grid { grid-template-columns: 1fr; gap: 9px; }
     .qqaw-preview-shell { width: min(58cqw, 270px); }
+    .qqaw-theme-preview-viewport { height: 154px; }
     .qqaw-history-list { grid-auto-columns: minmax(108px, 128px); }
 }
 @media (max-width: 720px) {

@@ -27,6 +27,8 @@
     const historyObjectUrls = new Set();
     let historyDbPromise = null;
     let userDisplayRevision = Date.now();
+    let themePreviewFrame = 0;
+    let themePreviewResizeObserver = null;
     let state = createInitialState();
 
     function createInitialState() {
@@ -623,7 +625,7 @@
                         <img class="qqaw-title-icon" alt="" />
                         <div>
                             <div id="qqaw-title">丘丘头像工作台</div>
-                            <div id="qqaw-subtitle">快速更换 · 自由构图 · 历史回滚</div>
+                            <div id="qqaw-subtitle">快速更换 · 主题预览 · 收藏回滚</div>
                         </div>
                     </div>
                     <div class="qqaw-window-actions">
@@ -653,6 +655,17 @@
                                 <button type="button" id="qqaw-pick-image" class="menu_button">选择新图片</button>
                                 <input id="qqaw-file-input" type="file" accept="image/*" hidden />
                                 <button type="button" id="qqaw-use-current" class="menu_button">重新载入当前头像</button>
+                            </div>
+
+                            <div class="qqaw-theme-preview-block">
+                                <div class="qqaw-mini-head">
+                                    <span>当前头像框预览</span>
+                                    <span class="qqaw-live-badge">LIVE</span>
+                                </div>
+                                <div id="qqaw-theme-preview-viewport" class="qqaw-theme-preview-viewport">
+                                    <div id="qqaw-theme-preview-empty" class="qqaw-theme-preview-empty">正在读取当前聊天的头像框…</div>
+                                </div>
+                                <div class="qqaw-small-note">镜像当前聊天中同类型消息的真实头像位置、遮罩、滤镜与头像框。拖动或缩放上方图片时，这里会同步预览最终效果，但不会改动聊天内容。</div>
                             </div>
                         </section>
 
@@ -696,6 +709,19 @@
                             <div class="qqaw-small-note">替换时固定输出 512×768（2:3）。图片只会被等比例裁切和缩放，不会横向或纵向拉伸。</div>
                         </section>
                     </div>
+
+                    <section class="qqaw-favorites-card">
+                        <div class="qqaw-section-head">
+                            <div>
+                                <div class="qqaw-section-kicker">FAVORITES</div>
+                                <div class="qqaw-section-title">收藏头像</div>
+                            </div>
+                            <button type="button" id="qqaw-favorite-current" class="qqaw-text-button">♡ 收藏当前</button>
+                        </div>
+                        <div id="qqaw-favorite-list" class="qqaw-history-list qqaw-favorite-list">
+                            <div class="qqaw-history-empty">把常用头像收藏起来，它们不会被历史数量上限清理。</div>
+                        </div>
+                    </section>
 
                     <section class="qqaw-history-card">
                         <div class="qqaw-section-head">
@@ -822,7 +848,15 @@
         $('#qqaw-icon-file').addEventListener('change', applyLocalIcon);
         $('#qqaw-reset-icon').addEventListener('click', resetWorkbenchIcon);
         $('#qqaw-clear-history').addEventListener('click', clearCurrentHistory);
+        $('#qqaw-favorite-current').addEventListener('click', favoriteCurrentAvatar);
         $('#qqaw-history-list').addEventListener('click', handleHistoryClick);
+        $('#qqaw-favorite-list').addEventListener('click', handleHistoryClick);
+        const themeViewport = $('#qqaw-theme-preview-viewport');
+        if (globalThis.ResizeObserver && themeViewport) {
+            themePreviewResizeObserver?.disconnect?.();
+            themePreviewResizeObserver = new ResizeObserver(() => scheduleThemePreview());
+            themePreviewResizeObserver.observe(themeViewport);
+        }
         $('#qqaw-launcher-gap').addEventListener('input', () => {
             settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
             $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
@@ -867,6 +901,7 @@
         settings.modalRect = null;
         saveSettings();
         applyModalRect(null, false);
+        scheduleThemePreview();
     }
 
     function persistCurrentModalRect() {
@@ -953,6 +988,7 @@
             height -= dy;
         }
         applyModalRect({ left, top, width, height }, false);
+        scheduleThemePreview();
     }
 
     function endModalResize(event) {
@@ -1061,6 +1097,7 @@
         state.pinchStart = null;
         state.dragging = false;
         revokeHistoryObjectUrls();
+        clearThemePreview();
     }
 
     function syncTargetUi() {
@@ -1645,7 +1682,7 @@
         return all
             .filter((item) => historyTargetMatches(item, target))
             .filter((item) => target?.kind !== 'char' || item.scope !== 'chat')
-            .filter((item) => item.scope !== 'chat' || item.chatId === chatId)
+            .filter((item) => item.favorite || item.scope !== 'chat' || item.chatId === chatId)
             .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     }
 
@@ -1698,7 +1735,7 @@
             };
             await historyPut(record);
             const records = await historyForTarget(target);
-            const sameScope = records.filter((item) => item.scope === record.scope && (record.scope !== 'chat' || item.chatId === chatId));
+            const sameScope = records.filter((item) => !item.favorite && item.scope === record.scope && (record.scope !== 'chat' || item.chatId === chatId));
             for (const item of sameScope.slice(HISTORY_LIMIT)) await historyDelete(item.id);
             return record;
         } catch (error) {
@@ -1707,40 +1744,107 @@
         }
     }
 
-    async function renderHistory() {
-        const list = modal?.querySelector('#qqaw-history-list');
-        if (!list || !state.target) return;
+    function historyCardHtml(record, favoriteSection = false) {
+        const favorite = Boolean(record.favorite);
+        return `
+            <button type="button" class="qqaw-favorite-toggle ${favorite ? 'is-favorite' : ''}" data-action="favorite" aria-label="${favorite ? '取消收藏' : '收藏头像'}" title="${favorite ? '取消收藏' : '收藏头像'}">${favorite ? '♥' : '♡'}</button>
+            <img class="qqaw-history-thumb" alt="${favoriteSection ? '收藏头像' : '历史头像'}" />
+            <div class="qqaw-history-meta">
+                <span class="qqaw-history-scope ${record.scope === 'chat' ? 'is-chat' : 'is-permanent'}">${record.scope === 'chat' ? '本次聊天' : '永久'}</span>
+                <span class="qqaw-history-time">${formatHistoryTime(record.createdAt)}</span>
+            </div>
+            <div class="qqaw-history-actions">
+                <button type="button" class="qqaw-history-rollback" data-action="rollback">一键回滚</button>
+                <button type="button" class="qqaw-history-delete" data-action="delete" aria-label="删除这条记录" title="删除">×</button>
+            </div>`;
+    }
+
+    function renderRecordList(list, records, favoriteSection = false) {
+        if (!list) return;
+        if (!records.length) {
+            list.innerHTML = favoriteSection
+                ? '<div class="qqaw-history-empty">还没有收藏头像。可以从历史记录点 ♡，或直接收藏当前头像。</div>'
+                : '<div class="qqaw-history-empty">还没有历史记录。第一次替换头像后会自动保存旧头像。</div>';
+            return;
+        }
+        list.innerHTML = '';
+        records.forEach((record) => {
+            const url = URL.createObjectURL(record.blob);
+            historyObjectUrls.add(url);
+            const card = document.createElement('article');
+            card.className = `qqaw-history-item${record.favorite ? ' is-favorite' : ''}`;
+            card.dataset.historyId = record.id;
+            card.innerHTML = historyCardHtml(record, favoriteSection);
+            card.querySelector('.qqaw-history-thumb').src = url;
+            list.append(card);
+        });
+    }
+
+    async function renderAvatarLibrary() {
+        const historyList = modal?.querySelector('#qqaw-history-list');
+        const favoriteList = modal?.querySelector('#qqaw-favorite-list');
+        if ((!historyList && !favoriteList) || !state.target) return;
         revokeHistoryObjectUrls();
-        list.innerHTML = '<div class="qqaw-history-empty">正在读取头像历史…</div>';
+        if (historyList) historyList.innerHTML = '<div class="qqaw-history-empty">正在读取头像历史…</div>';
+        if (favoriteList) favoriteList.innerHTML = '<div class="qqaw-history-empty">正在读取收藏头像…</div>';
         try {
             const records = await historyForTarget(state.target);
-            if (!records.length) {
-                list.innerHTML = '<div class="qqaw-history-empty">还没有历史记录。第一次替换头像后会自动保存旧头像。</div>';
-                return;
-            }
-            list.innerHTML = '';
-            records.forEach((record) => {
-                const url = URL.createObjectURL(record.blob);
-                historyObjectUrls.add(url);
-                const card = document.createElement('article');
-                card.className = 'qqaw-history-item';
-                card.dataset.historyId = record.id;
-                card.innerHTML = `
-                    <img class="qqaw-history-thumb" alt="历史头像" />
-                    <div class="qqaw-history-meta">
-                        <span class="qqaw-history-scope ${record.scope === 'chat' ? 'is-chat' : 'is-permanent'}">${record.scope === 'chat' ? '本次聊天' : '永久'}</span>
-                        <span class="qqaw-history-time">${formatHistoryTime(record.createdAt)}</span>
-                    </div>
-                    <div class="qqaw-history-actions">
-                        <button type="button" class="qqaw-history-rollback" data-action="rollback">一键回滚</button>
-                        <button type="button" class="qqaw-history-delete" data-action="delete" aria-label="删除这条历史" title="删除">×</button>
-                    </div>`;
-                card.querySelector('.qqaw-history-thumb').src = url;
-                list.append(card);
-            });
+            renderRecordList(favoriteList, records.filter((record) => record.favorite), true);
+            renderRecordList(historyList, records.filter((record) => !record.favorite), false);
         } catch (error) {
-            console.error('[丘丘头像工作台] 读取头像历史失败', error);
-            list.innerHTML = '<div class="qqaw-history-empty">当前环境暂时无法读取头像历史。</div>';
+            console.error('[丘丘头像工作台] 读取头像收藏 / 历史失败', error);
+            if (historyList) historyList.innerHTML = '<div class="qqaw-history-empty">当前环境暂时无法读取头像历史。</div>';
+            if (favoriteList) favoriteList.innerHTML = '<div class="qqaw-history-empty">当前环境暂时无法读取收藏头像。</div>';
+        }
+    }
+
+    async function renderHistory() {
+        return renderAvatarLibrary();
+    }
+
+    async function pruneNonFavoriteHistory(target) {
+        const chatId = getCurrentChatIdentity();
+        const records = await historyForTarget(target);
+        for (const scope of ['permanent', 'chat']) {
+            const scoped = records.filter((item) => !item.favorite && item.scope === scope && (scope !== 'chat' || item.chatId === chatId));
+            for (const item of scoped.slice(HISTORY_LIMIT)) await historyDelete(item.id);
+        }
+    }
+
+    async function favoriteCurrentAvatar() {
+        if (!state.target?.key) {
+            notify('warning', '没有识别到当前头像，暂时无法收藏。');
+            return;
+        }
+        const button = modal?.querySelector('#qqaw-favorite-current');
+        if (button) button.disabled = true;
+        try {
+            const override = state.target.kind === 'user' ? getChatOverrideForTarget(state.target) : null;
+            const scope = override ? 'chat' : 'permanent';
+            const sourceUrl = override ? chatOverrideUrl(override) : permanentAvatarUrl(state.target);
+            const blob = await fetchAvatarBlob(sourceUrl);
+            const record = {
+                id: globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                createdAt: Date.now(),
+                kind: state.target.kind,
+                targetKey: state.target.key || '',
+                targetName: state.target.name || '',
+                charId: state.target.charId,
+                scope,
+                chatId: scope === 'chat' ? getCurrentChatIdentity() : '',
+                wasChatOverride: scope === 'chat',
+                favorite: true,
+                type: blob.type || 'image/png',
+                blob,
+            };
+            await historyPut(record);
+            await renderAvatarLibrary();
+            notify('success', '当前头像已加入收藏。');
+        } catch (error) {
+            console.error('[丘丘头像工作台] 收藏当前头像失败', error);
+            notify('error', error.message || '收藏当前头像失败。');
+        } finally {
+            if (button) button.disabled = false;
         }
     }
 
@@ -1749,6 +1853,17 @@
         const card = event.target.closest?.('.qqaw-history-item');
         if (!button || !card) return;
         const id = card.dataset.historyId;
+        if (button.dataset.action === 'favorite') {
+            const records = await historyForTarget(state.target);
+            const record = records.find((item) => item.id === id);
+            if (!record) return;
+            record.favorite = !record.favorite;
+            await historyPut(record);
+            if (!record.favorite) await pruneNonFavoriteHistory(state.target);
+            await renderAvatarLibrary();
+            notify('success', record.favorite ? '已加入收藏。' : '已取消收藏。');
+            return;
+        }
         if (button.dataset.action === 'delete') {
             await historyDelete(id);
             await renderHistory();
@@ -1796,9 +1911,9 @@
         if (!state.target) return;
         try {
             const records = await historyForTarget(state.target);
-            for (const record of records) await historyDelete(record.id);
-            await renderHistory();
-            notify('success', '当前头像的历史记录已清空。');
+            for (const record of records.filter((item) => !item.favorite)) await historyDelete(record.id);
+            await renderAvatarLibrary();
+            notify('success', '历史记录已清空；收藏头像已保留。');
         } catch (error) {
             notify('error', error.message || '清空头像历史失败。');
         }
@@ -1958,6 +2073,210 @@
         modal.querySelector('#qqaw-zoom-value').value = `${state.layout.zoom.toFixed(2)}×`;
         modal.querySelector('#qqaw-x-value').value = `${Math.round(state.layout.x)}%`;
         modal.querySelector('#qqaw-y-value').value = `${Math.round(state.layout.y)}%`;
+        scheduleThemePreview();
+    }
+
+    function clearThemePreview() {
+        if (themePreviewFrame) cancelAnimationFrame(themePreviewFrame);
+        themePreviewFrame = 0;
+        const viewport = modal?.querySelector('#qqaw-theme-preview-viewport');
+        if (!viewport) return;
+        viewport.querySelectorAll('.qqaw-theme-preview-message').forEach((node) => node.remove());
+        const empty = viewport.querySelector('#qqaw-theme-preview-empty');
+        if (empty) empty.hidden = false;
+    }
+
+    function scheduleThemePreview() {
+        if (!modal || modal.classList.contains('qqaw-hidden')) return;
+        if (themePreviewFrame) cancelAnimationFrame(themePreviewFrame);
+        themePreviewFrame = requestAnimationFrame(() => {
+            themePreviewFrame = 0;
+            renderThemePreview();
+        });
+    }
+
+    function representativeMessageForTarget(target) {
+        if (!target) return null;
+        const selector = target.kind === 'user'
+            ? '#chat .mes[is_user="true"]:not(.template_element)'
+            : '#chat .mes[is_user="false"]:not(.template_element)';
+        const messages = [...document.querySelectorAll(selector)];
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const message = messages[i];
+            if (target.kind === 'user') return message;
+            const candidate = getTargetFromMessage(message);
+            if (!candidate) continue;
+            if ((candidate.key && target.key && candidate.key === target.key)
+                || (candidate.charId != null && target.charId != null && Number(candidate.charId) === Number(target.charId))
+                || (candidate.name && target.name && candidate.name === target.name)) return message;
+        }
+        return messages.at(-1) || null;
+    }
+
+    function displayedAvatarElement(message) {
+        if (!message) return null;
+        const protectedLayer = message.querySelector(':scope > .qqaw-protected-user-avatar');
+        if (protectedLayer && getComputedStyle(protectedLayer).display !== 'none') return protectedLayer;
+        return message.querySelector('.avatar img:not(.qqaw-protected-user-avatar)');
+    }
+
+    function parseObjectPosition(value = '50% 50%') {
+        const tokens = String(value).trim().split(/\s+/);
+        const parse = (token, fallback) => {
+            const lower = String(token || '').toLowerCase();
+            if (lower === 'left' || lower === 'top') return 0;
+            if (lower === 'center') return .5;
+            if (lower === 'right' || lower === 'bottom') return 1;
+            if (lower.endsWith('%')) return clamp(parseFloat(lower) / 100, 0, 1);
+            return fallback;
+        };
+        return [parse(tokens[0], .5), parse(tokens[1] ?? tokens[0], .5)];
+    }
+
+    function drawObjectFitPreview(sourceCanvas, targetCanvas, style) {
+        const ctx2 = targetCanvas.getContext('2d');
+        if (!ctx2 || !sourceCanvas?.width || !sourceCanvas?.height) return;
+        const dw = targetCanvas.width;
+        const dh = targetCanvas.height;
+        const sw = sourceCanvas.width;
+        const sh = sourceCanvas.height;
+        ctx2.clearRect(0, 0, dw, dh);
+        const fit = style?.objectFit || 'fill';
+        if (fit === 'fill' || fit === 'none') {
+            ctx2.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, dw, dh);
+            return;
+        }
+        const contain = fit === 'contain' || fit === 'scale-down';
+        const scale = contain ? Math.min(dw / sw, dh / sh) : Math.max(dw / sw, dh / sh);
+        const rw = sw * scale;
+        const rh = sh * scale;
+        const [px, py] = parseObjectPosition(style?.objectPosition || '50% 50%');
+        const dx = (dw - rw) * px;
+        const dy = (dh - rh) * py;
+        ctx2.imageSmoothingEnabled = true;
+        ctx2.imageSmoothingQuality = 'high';
+        ctx2.drawImage(sourceCanvas, 0, 0, sw, sh, dx, dy, rw, rh);
+    }
+
+    function copyThemeAvatarVisualStyle(source, canvas, sourceMessage, sourceAvatar) {
+        const sourceRect = source.getBoundingClientRect();
+        const avatarRect = sourceAvatar.getBoundingClientRect();
+        const cs = getComputedStyle(source);
+        const important = (name, value) => {
+            if (value != null && value !== '') canvas.style.setProperty(name, value, 'important');
+        };
+        important('position', 'absolute');
+        important('left', `${sourceRect.left - avatarRect.left}px`);
+        important('top', `${sourceRect.top - avatarRect.top}px`);
+        important('width', `${sourceRect.width}px`);
+        important('height', `${sourceRect.height}px`);
+        important('margin', '0');
+        important('transform', 'none');
+        important('transform-origin', 'center center');
+        important('border-radius', cs.borderRadius);
+        important('border-top', cs.borderTop);
+        important('border-right', cs.borderRight);
+        important('border-bottom', cs.borderBottom);
+        important('border-left', cs.borderLeft);
+        important('box-shadow', cs.boxShadow);
+        important('opacity', cs.opacity);
+        important('filter', cs.filter);
+        important('clip-path', cs.clipPath);
+        important('-webkit-clip-path', cs.webkitClipPath || cs.clipPath);
+        important('mask-image', cs.maskImage);
+        important('-webkit-mask-image', cs.webkitMaskImage || cs.maskImage);
+        important('mask-size', cs.maskSize);
+        important('-webkit-mask-size', cs.webkitMaskSize || cs.maskSize);
+        important('mask-position', cs.maskPosition);
+        important('-webkit-mask-position', cs.webkitMaskPosition || cs.maskPosition);
+        important('mask-repeat', cs.maskRepeat);
+        important('-webkit-mask-repeat', cs.webkitMaskRepeat || cs.maskRepeat);
+        important('pointer-events', 'none');
+        important('z-index', cs.zIndex === 'auto' ? '0' : cs.zIndex);
+        important('visibility', 'visible');
+        return cs;
+    }
+
+    function renderThemePreview() {
+        const viewport = modal?.querySelector('#qqaw-theme-preview-viewport');
+        const empty = modal?.querySelector('#qqaw-theme-preview-empty');
+        const sourceCanvas = modal?.querySelector('#qqaw-preview-canvas');
+        if (!viewport || !empty) return;
+        viewport.querySelectorAll('.qqaw-theme-preview-message').forEach((node) => node.remove());
+        if (!state.loadedImage || !sourceCanvas?.width || !sourceCanvas?.height) {
+            empty.hidden = false;
+            empty.textContent = '载入头像后，这里会显示当前主题的真实头像框效果。';
+            return;
+        }
+        const sourceMessage = representativeMessageForTarget(state.target);
+        const sourceAvatar = sourceMessage?.querySelector('.avatar');
+        const sourceImage = displayedAvatarElement(sourceMessage);
+        if (!sourceMessage || !sourceAvatar || !sourceImage) {
+            empty.hidden = false;
+            empty.textContent = '当前聊天中暂时找不到可镜像的同类型头像框。';
+            return;
+        }
+        const messageRect = sourceMessage.getBoundingClientRect();
+        const imageRect = sourceImage.getBoundingClientRect();
+        if (!messageRect.width || !messageRect.height || !imageRect.width || !imageRect.height) {
+            empty.hidden = false;
+            empty.textContent = '当前头像框尚未完成布局，稍后再试。';
+            return;
+        }
+
+        const clone = sourceMessage.cloneNode(true);
+        clone.classList.add('qqaw-theme-preview-message');
+        clone.setAttribute('aria-hidden', 'true');
+        clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+        clone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
+        clone.querySelectorAll('.avatar img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
+        clone.querySelectorAll('button, input, textarea, select, a').forEach((node) => node.setAttribute('tabindex', '-1'));
+        const sourceDisplay = getComputedStyle(sourceMessage).display;
+        clone.style.setProperty('position', 'absolute', 'important');
+        clone.style.setProperty('left', '0px', 'important');
+        clone.style.setProperty('top', '0px', 'important');
+        clone.style.setProperty('width', `${messageRect.width}px`, 'important');
+        clone.style.setProperty('height', `${messageRect.height}px`, 'important');
+        clone.style.setProperty('min-width', `${messageRect.width}px`, 'important');
+        clone.style.setProperty('min-height', `${messageRect.height}px`, 'important');
+        clone.style.setProperty('max-width', 'none', 'important');
+        clone.style.setProperty('max-height', 'none', 'important');
+        clone.style.setProperty('box-sizing', 'border-box', 'important');
+        clone.style.setProperty('margin', '0', 'important');
+        clone.style.setProperty('display', sourceDisplay === 'none' ? 'block' : sourceDisplay, 'important');
+        clone.style.setProperty('pointer-events', 'none', 'important');
+        clone.style.setProperty('contain', 'none', 'important');
+        clone.style.setProperty('content-visibility', 'visible', 'important');
+
+        viewport.append(clone);
+        const cloneAvatar = clone.querySelector('.avatar');
+        if (!cloneAvatar) {
+            clone.remove();
+            empty.hidden = false;
+            return;
+        }
+        const candidate = document.createElement('canvas');
+        candidate.className = 'qqaw-theme-preview-avatar';
+        candidate.width = Math.max(96, Math.min(768, Math.round(imageRect.width * 2)));
+        candidate.height = Math.max(96, Math.min(768, Math.round(imageRect.height * 2)));
+        const sourceStyle = copyThemeAvatarVisualStyle(sourceImage, candidate, sourceMessage, sourceAvatar);
+        drawObjectFitPreview(sourceCanvas, candidate, sourceStyle);
+        cloneAvatar.append(candidate);
+
+        const vw = Math.max(1, viewport.clientWidth);
+        const vh = Math.max(1, viewport.clientHeight);
+        const localCenterX = imageRect.left - messageRect.left + imageRect.width / 2;
+        const localCenterY = imageRect.top - messageRect.top + imageRect.height / 2;
+        const contextW = Math.max(imageRect.width * 2.25, 220);
+        const contextH = Math.max(imageRect.height * 2.25, 160);
+        const scale = clamp(Math.min(vw / contextW, vh / contextH), 0.08, 2.5);
+        const left = vw / 2 - localCenterX * scale;
+        const top = vh / 2 - localCenterY * scale;
+        clone.style.setProperty('transform-origin', '0 0', 'important');
+        clone.style.setProperty('transform', `scale(${scale})`, 'important');
+        clone.style.setProperty('left', `${left}px`, 'important');
+        clone.style.setProperty('top', `${top}px`, 'important');
+        empty.hidden = true;
     }
 
     function pointerDistance(a, b) {
