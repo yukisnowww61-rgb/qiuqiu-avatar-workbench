@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.1.4 */
+/* 丘丘头像工作台 v0.1.5 · compact cute glass UI */
 
 .qqaw-name-button {
     appearance: none;
@@ -28,14 +28,8 @@
     -webkit-tap-highlight-color: transparent;
 }
 
-
-.qqaw-launcher-host {
-    position: relative !important;
-}
-.qqaw-name-button[hidden] {
-    display: none !important;
-}
-
+.qqaw-launcher-host { position: relative !important; }
+.qqaw-name-button[hidden] { display: none !important; }
 .qqaw-name-button img {
     display: block !important;
     width: 100% !important;
@@ -51,17 +45,10 @@
     pointer-events: none;
 }
 
-
-.avatar img.qqaw-framed-avatar {
-    object-fit: cover !important;
-}
-
+.avatar img.qqaw-framed-avatar { object-fit: cover !important; }
 @supports (object-view-box: xywh(0px 0px 1px 1px)) {
-    .avatar img.qqaw-framed-avatar {
-        object-position: 50% 50% !important;
-    }
+    .avatar img.qqaw-framed-avatar { object-position: 50% 50% !important; }
 }
-
 @supports not (object-view-box: xywh(0px 0px 1px 1px)) {
     .avatar img.qqaw-framed-avatar {
         object-position: var(--qqaw-x, 50%) var(--qqaw-y, 50%) !important;
@@ -78,33 +65,37 @@
     pointer-events: none;
     background: transparent;
 }
-
-#qqaw-overlay.qqaw-hidden {
-    display: none !important;
-}
-
-body.qqaw-modal-open {
-    /* 浮动工作台不锁定聊天滚动，方便边看头像框边调整。 */
-}
+#qqaw-overlay.qqaw-hidden { display: none !important; }
 
 #qqaw-modal {
+    --qqaw-pink: var(--SmartThemeQuoteColor, #fdacbf);
+    --qqaw-blue: var(--SmartThemeLinkColor, #4dd0e1);
+    --qqaw-ink: var(--SmartThemeBodyColor, #302a2d);
+    --qqaw-surface: color-mix(in srgb, var(--SmartThemeBlurTintColor, #fff) 94%, #fff 6%);
+    --qqaw-soft: color-mix(in srgb, var(--qqaw-pink) 8%, transparent);
+    --qqaw-line: color-mix(in srgb, var(--qqaw-ink) 11%, transparent);
     position: fixed;
     left: 4vw;
     top: 6dvh;
-    width: min(820px, 92vw);
-    height: min(760px, 86dvh);
-    min-width: 280px;
-    min-height: 320px;
+    width: min(790px, 92vw);
+    height: min(720px, 86dvh);
+    min-width: 292px;
+    min-height: 340px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     pointer-events: auto;
     container-type: inline-size;
-    color: var(--SmartThemeBodyColor, #222);
-    background: var(--SmartThemeBlurTintColor, rgb(255 255 255 / 96%));
-    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    border-radius: 18px;
-    box-shadow: 0 22px 70px rgb(0 0 0 / 28%);
+    color: var(--qqaw-ink);
+    background:
+        radial-gradient(circle at 6% 0%, color-mix(in srgb, var(--qqaw-pink) 16%, transparent), transparent 30%),
+        radial-gradient(circle at 100% 12%, color-mix(in srgb, var(--qqaw-blue) 9%, transparent), transparent 28%),
+        var(--qqaw-surface);
+    border: 1px solid color-mix(in srgb, var(--qqaw-pink) 30%, var(--qqaw-line));
+    border-radius: 22px;
+    box-shadow: 0 24px 80px rgb(27 20 24 / 24%), 0 4px 18px rgb(27 20 24 / 10%);
+    backdrop-filter: blur(18px) saturate(1.08);
+    -webkit-backdrop-filter: blur(18px) saturate(1.08);
 }
 
 .qqaw-header {
@@ -113,469 +104,338 @@ body.qqaw-modal-open {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 16px 18px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #fff) 94%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    gap: 14px;
+    padding: 13px 15px 12px;
+    background: color-mix(in srgb, var(--qqaw-surface) 88%, transparent);
+    border-bottom: 1px solid var(--qqaw-line);
     cursor: move;
     touch-action: none;
     user-select: none;
 }
-
-.qqaw-title-wrap {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.qqaw-title-icon {
-    width: 34px;
-    height: 34px;
-    object-fit: contain;
-    flex: 0 0 34px;
-}
-
-#qqaw-title {
-    font-weight: 700;
-    font-size: 1.05rem;
-    line-height: 1.2;
-}
-
-#qqaw-subtitle {
-    margin-top: 3px;
-    opacity: .62;
-    font-size: .78rem;
-}
-
+.qqaw-title-wrap { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.qqaw-title-icon { width: 32px; height: 32px; object-fit: contain; flex: 0 0 32px; }
+#qqaw-title { font-weight: 760; font-size: 1rem; line-height: 1.2; letter-spacing: .01em; }
+#qqaw-subtitle { margin-top: 2px; opacity: .56; font-size: .7rem; }
+.qqaw-window-actions { display: flex; gap: 5px; }
 .qqaw-icon-button {
     appearance: none;
-    width: 36px;
-    height: 36px;
-    border: 0;
-    border-radius: 50%;
-    background: color-mix(in srgb, currentColor 8%, transparent);
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 11px;
+    background: color-mix(in srgb, #fff 64%, transparent);
     color: inherit;
-    font-size: 25px;
+    font-size: 21px;
     line-height: 1;
     cursor: pointer;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 5%);
 }
-
-.qqaw-window-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
-}
-
-.qqaw-window-actions .qqaw-icon-button {
-    cursor: pointer;
-    touch-action: manipulation;
-}
-
-#qqaw-reset-window {
-    font-size: 18px;
-}
+#qqaw-reset-window { font-size: 16px; }
+.qqaw-icon-button:active { transform: translateY(1px); }
 
 .qqaw-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
     overscroll-behavior: contain;
-    padding: 16px 18px 20px;
+    padding: 13px 14px 17px;
+    scrollbar-width: thin;
 }
 
 .qqaw-target-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
-    margin-bottom: 16px;
+    gap: 6px;
+    margin-bottom: 11px;
+    padding: 7px;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 15px;
+    background: color-mix(in srgb, #fff 52%, transparent);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 50%);
 }
-
 .qqaw-target-button,
-.qqaw-chip {
+.qqaw-chip,
+.qqaw-scope-button {
     appearance: none;
-    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    background: color-mix(in srgb, currentColor 4%, transparent);
+    border: 1px solid transparent;
+    background: transparent;
     color: inherit;
     border-radius: 999px;
-    padding: 7px 12px;
     cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, transform .16s ease;
 }
-
+.qqaw-target-button { padding: 6px 10px; font-size: .76rem; font-weight: 700; }
 .qqaw-target-button.active,
-.qqaw-chip.active {
-    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #fdacbf) 26%, transparent);
-    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor, #fdacbf) 58%, transparent);
+.qqaw-chip.active,
+.qqaw-scope-button.active {
+    background: color-mix(in srgb, var(--qqaw-pink) 20%, #fff 80%);
+    border-color: color-mix(in srgb, var(--qqaw-pink) 42%, transparent);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--qqaw-pink) 13%, transparent);
 }
-
-.qqaw-target-info {
-    min-width: 0;
-    margin-left: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-#qqaw-target-name {
-    font-weight: 650;
-}
-
-#qqaw-target-file {
-    max-width: 52vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    opacity: .58;
-    font-size: .72rem;
-}
+.qqaw-target-info { min-width: 0; display: flex; flex-direction: column; gap: 1px; padding-left: 5px; }
+#qqaw-target-name { font-weight: 700; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#qqaw-target-file { opacity: .48; font-size: .64rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .qqaw-main-grid {
     display: grid;
-    grid-template-columns: minmax(250px, .95fr) minmax(300px, 1.05fr);
-    gap: 22px;
+    grid-template-columns: minmax(230px, .92fr) minmax(280px, 1.08fr);
+    gap: 11px;
     align-items: start;
 }
-
 .qqaw-preview-panel,
-.qqaw-controls-panel {
+.qqaw-controls-panel,
+.qqaw-history-card,
+.qqaw-icon-settings {
     min-width: 0;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 17px;
+    background: color-mix(in srgb, #fff 59%, transparent);
+    box-shadow: 0 5px 20px rgb(26 21 24 / 5%);
 }
+.qqaw-preview-panel { padding: 12px; }
+.qqaw-controls-panel { padding: 13px; }
 
 .qqaw-preview-shell {
     --qqaw-aspect-w: 2;
     --qqaw-aspect-h: 3;
     position: relative;
-    width: min(100%, 390px);
+    width: min(100%, 350px);
     aspect-ratio: var(--qqaw-aspect-w) / var(--qqaw-aspect-h);
     margin-inline: auto;
     overflow: hidden;
-    border-radius: 16px;
+    border-radius: 15px;
     background:
-        linear-gradient(45deg, rgb(127 127 127 / 10%) 25%, transparent 25%, transparent 75%, rgb(127 127 127 / 10%) 75%),
-        linear-gradient(45deg, rgb(127 127 127 / 10%) 25%, transparent 25%, transparent 75%, rgb(127 127 127 / 10%) 75%);
-    background-size: 20px 20px;
-    background-position: 0 0, 10px 10px;
-    border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        linear-gradient(45deg, rgb(127 127 127 / 7%) 25%, transparent 25%, transparent 75%, rgb(127 127 127 / 7%) 75%),
+        linear-gradient(45deg, rgb(127 127 127 / 7%) 25%, transparent 25%, transparent 75%, rgb(127 127 127 / 7%) 75%),
+        #fff;
+    background-size: 18px 18px;
+    background-position: 0 0, 9px 9px;
+    border: 1px solid color-mix(in srgb, var(--qqaw-pink) 26%, var(--qqaw-line));
+    box-shadow: 0 10px 26px rgb(50 37 44 / 9%);
     touch-action: none;
     cursor: grab;
     user-select: none;
 }
-
-.qqaw-preview-shell:active {
-    cursor: grabbing;
-}
-
-#qqaw-preview-canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-    max-width: none;
-    pointer-events: none;
-}
-
-.qqaw-fixed-ratio {
-    display: inline-flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 7px 11px;
-    border-radius: 10px;
-    background: color-mix(in srgb, currentColor 6%, transparent);
-    border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-    font-size: .82rem;
-}
-
-.qqaw-gap-control {
-    margin-top: 14px;
-}
-
-#qqaw-preview-img[hidden] {
-    display: none !important;
-}
-
-#qqaw-preview-img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    max-width: none;
-    object-fit: cover;
-    object-position: 50% 50%;
-    user-select: none;
-    -webkit-user-drag: none;
-}
-
-@supports not (object-view-box: xywh(0px 0px 1px 1px)) {
-    #qqaw-preview-img {
-        object-position: var(--qqaw-x, 50%) var(--qqaw-y, 50%);
-        transform: scale(var(--qqaw-zoom, 1));
-        transform-origin: center center;
-    }
-}
-
-#qqaw-preview-img.qqaw-loading {
-    opacity: .45;
-}
-
+.qqaw-preview-shell:active { cursor: grabbing; }
+#qqaw-preview-canvas { display: block; width: 100%; height: 100%; max-width: none; pointer-events: none; }
+#qqaw-preview-img[hidden] { display: none !important; }
 .qqaw-preview-hint {
     position: absolute;
     left: 50%;
-    bottom: 10px;
+    bottom: 8px;
     transform: translateX(-50%);
     width: max-content;
-    max-width: calc(100% - 18px);
-    padding: 5px 9px;
+    max-width: calc(100% - 16px);
+    padding: 4px 8px;
     border-radius: 999px;
-    background: rgb(0 0 0 / 48%);
+    background: rgb(38 31 35 / 58%);
     color: #fff;
-    font-size: 11px;
+    font-size: 10px;
+    letter-spacing: .02em;
     pointer-events: none;
+    backdrop-filter: blur(7px);
 }
 
 .qqaw-upload-row,
 .qqaw-control-actions,
 .qqaw-icon-buttons,
-.qqaw-chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
+.qqaw-chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.qqaw-upload-row { justify-content: center; margin-top: 10px; }
 
-.qqaw-upload-row {
-    justify-content: center;
-    margin-top: 12px;
-}
-
-.qqaw-control-block {
-    margin-bottom: 16px;
-}
-
-.qqaw-control-title {
-    margin-bottom: 8px;
-    font-size: .84rem;
-    font-weight: 650;
-}
-
-.qqaw-slider-row {
-    display: block;
-    margin: 16px 0;
-}
-
-.qqaw-slider-row > span {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 7px;
-    font-size: .83rem;
-}
-
-.qqaw-slider-row output {
-    opacity: .7;
-    font-variant-numeric: tabular-nums;
-}
-
-.qqaw-slider-row input[type="range"] {
-    width: 100%;
-}
-
-.qqaw-control-actions {
-    margin-top: 18px;
-}
-
-#qqaw-modal .menu_button {
-    min-height: 34px;
-}
-
-#qqaw-modal .qqaw-primary {
-    font-weight: 700;
-}
-
-#qqaw-replace-avatar {
-    width: 100%;
-    margin-top: 2px;
-    font-weight: 700;
-}
-
-.qqaw-small-note {
-    margin-top: 7px;
-    opacity: .62;
-    font-size: .72rem;
-    line-height: 1.5;
-}
-
-.qqaw-divider {
-    height: 1px;
-    margin: 18px 0;
-    background: color-mix(in srgb, currentColor 12%, transparent);
-}
-
-.qqaw-icon-settings {
-    margin-top: 20px;
-    padding-top: 14px;
-    border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-}
-
-.qqaw-icon-settings > summary {
+#qqaw-modal .menu_button,
+.qqaw-text-button,
+.qqaw-history-rollback,
+.qqaw-history-delete {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 11px;
+    background: color-mix(in srgb, #fff 74%, transparent);
+    color: inherit;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 4%);
     cursor: pointer;
-    font-weight: 650;
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+#qqaw-modal .menu_button { min-height: 32px; padding: 6px 10px; font-size: .76rem; }
+#qqaw-modal .menu_button:hover,
+.qqaw-history-rollback:hover { background: color-mix(in srgb, var(--qqaw-pink) 10%, #fff 90%); }
+#qqaw-modal .menu_button:active,
+.qqaw-history-rollback:active { transform: translateY(1px); }
+#qqaw-modal .qqaw-primary {
+    border-color: color-mix(in srgb, var(--qqaw-pink) 42%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--qqaw-pink) 22%, #fff), color-mix(in srgb, var(--qqaw-pink) 13%, #fff));
+    font-weight: 720;
 }
 
-.qqaw-icon-settings-grid {
-    display: grid;
-    gap: 10px;
-    margin-top: 12px;
+.qqaw-control-block { margin-bottom: 10px; }
+.qqaw-control-title { margin-bottom: 6px; font-size: .74rem; font-weight: 760; letter-spacing: .035em; }
+.qqaw-fixed-ratio {
+    display: inline-flex;
+    align-items: center;
+    min-height: 29px;
+    padding: 5px 9px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--qqaw-blue) 7%, #fff 93%);
+    border: 1px solid color-mix(in srgb, var(--qqaw-blue) 20%, transparent);
+    font-size: .69rem;
 }
-
-.qqaw-icon-settings-grid label {
-    display: grid;
-    gap: 6px;
-    font-size: .82rem;
-}
-
-#qqaw-icon-url {
-    width: 100%;
-}
-
+.qqaw-slider-row { display: block; margin: 11px 0; }
+.qqaw-slider-row > span { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; font-size: .72rem; }
+.qqaw-slider-row output { opacity: .64; font-variant-numeric: tabular-nums; }
+.qqaw-slider-row input[type="range"] { width: 100%; accent-color: var(--qqaw-pink); }
+.qqaw-control-actions { margin-top: 11px; }
+.qqaw-small-note { margin-top: 5px; opacity: .56; font-size: .65rem; line-height: 1.45; }
+.qqaw-divider { height: 1px; margin: 12px 0; background: var(--qqaw-line); }
 
 .qqaw-scope-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    padding: 4px;
+    margin-bottom: 2px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--qqaw-ink) 4%, transparent);
+}
+.qqaw-scope-button { min-height: 31px; padding: 4px 8px; font-size: .71rem; }
+.qqaw-scope-button.active { font-weight: 720; }
+#qqaw-replace-avatar {
+    width: 100%;
+    margin-top: 9px;
+    min-height: 37px !important;
+    border-color: color-mix(in srgb, var(--qqaw-pink) 50%, transparent) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--qqaw-pink) 28%, #fff), color-mix(in srgb, var(--qqaw-blue) 9%, #fff)) !important;
+    font-weight: 760;
+    letter-spacing: .015em;
+}
+.qqaw-clear-chat-avatar { width: 100%; margin: 7px 0 0; opacity: .82; }
+
+.qqaw-history-card { margin-top: 11px; padding: 12px; }
+.qqaw-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.qqaw-section-kicker { color: color-mix(in srgb, var(--qqaw-pink) 74%, var(--qqaw-ink)); font-size: .55rem; font-weight: 800; letter-spacing: .12em; opacity: .78; }
+.qqaw-section-title { margin-top: 1px; font-size: .82rem; font-weight: 760; }
+.qqaw-text-button { min-height: 27px; padding: 4px 9px; font-size: .65rem; opacity: .72; }
+.qqaw-history-list {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(122px, 142px);
     gap: 8px;
-    margin-bottom: 4px;
+    overflow-x: auto;
+    padding: 1px 1px 5px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
 }
+.qqaw-history-empty {
+    grid-column: 1 / -1;
+    min-height: 74px;
+    display: grid;
+    place-items: center;
+    padding: 12px;
+    border: 1px dashed color-mix(in srgb, var(--qqaw-pink) 25%, var(--qqaw-line));
+    border-radius: 12px;
+    color: color-mix(in srgb, var(--qqaw-ink) 56%, transparent);
+    font-size: .67rem;
+    text-align: center;
+}
+.qqaw-history-item {
+    scroll-snap-align: start;
+    position: relative;
+    min-width: 0;
+    padding: 6px;
+    border: 1px solid var(--qqaw-line);
+    border-radius: 13px;
+    background: color-mix(in srgb, #fff 78%, transparent);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 4%);
+}
+.qqaw-history-thumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: 9px;
+    background: #fff;
+}
+.qqaw-history-meta { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin: 6px 1px 5px; }
+.qqaw-history-scope {
+    min-width: 0;
+    padding: 2px 5px;
+    border-radius: 999px;
+    font-size: .56rem;
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--qqaw-blue) 12%, #fff 88%);
+}
+.qqaw-history-scope.is-permanent { background: color-mix(in srgb, var(--qqaw-pink) 14%, #fff 86%); }
+.qqaw-history-time { opacity: .48; font-size: .54rem; white-space: nowrap; }
+.qqaw-history-actions { display: grid; grid-template-columns: 1fr 25px; gap: 5px; }
+.qqaw-history-rollback { min-height: 27px; padding: 3px 6px; font-size: .62rem; font-weight: 690; }
+.qqaw-history-delete { width: 25px; min-height: 27px; padding: 0; font-size: 16px; opacity: .55; }
 
-.qqaw-scope-button {
-    appearance: none;
-    min-height: 36px;
-    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-    border-radius: 10px;
-    background: color-mix(in srgb, currentColor 4%, transparent);
-    color: inherit;
+.qqaw-icon-settings { margin-top: 11px; overflow: hidden; }
+.qqaw-icon-settings > summary {
     cursor: pointer;
+    padding: 10px 12px;
+    font-size: .75rem;
+    font-weight: 720;
+    list-style-position: inside;
 }
+.qqaw-icon-settings[open] > summary { border-bottom: 1px solid var(--qqaw-line); }
+.qqaw-icon-settings-grid { display: grid; gap: 9px; padding: 11px 12px 12px; }
+.qqaw-icon-settings-grid label { display: grid; gap: 5px; font-size: .7rem; }
+#qqaw-icon-url { width: 100%; }
+.qqaw-gap-control { margin-top: 4px; }
 
-.qqaw-scope-button.active {
-    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #fdacbf) 28%, transparent);
-    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor, #fdacbf) 62%, transparent);
-    font-weight: 700;
-}
-
-.qqaw-resize-handle {
-    position: absolute;
-    z-index: 20;
-    pointer-events: auto;
-    touch-action: none;
-}
-
-.qqaw-resize-n,
-.qqaw-resize-s {
-    left: 16px;
-    right: 16px;
-    height: 10px;
-    cursor: ns-resize;
-}
-
-.qqaw-resize-n { top: -2px; }
-.qqaw-resize-s { bottom: -2px; }
-
-.qqaw-resize-e,
-.qqaw-resize-w {
-    top: 16px;
-    bottom: 16px;
-    width: 10px;
-    cursor: ew-resize;
-}
-
-.qqaw-resize-e { right: -2px; }
-.qqaw-resize-w { left: -2px; }
-
-.qqaw-resize-ne,
-.qqaw-resize-se,
-.qqaw-resize-sw,
-.qqaw-resize-nw {
-    width: 22px;
-    height: 22px;
-}
-
+.qqaw-resize-handle { position: absolute; z-index: 20; pointer-events: auto; touch-action: none; }
+.qqaw-resize-n,.qqaw-resize-s { left: 16px; right: 16px; height: 10px; cursor: ns-resize; }
+.qqaw-resize-n { top: -2px; } .qqaw-resize-s { bottom: -2px; }
+.qqaw-resize-e,.qqaw-resize-w { top: 16px; bottom: 16px; width: 10px; cursor: ew-resize; }
+.qqaw-resize-e { right: -2px; } .qqaw-resize-w { left: -2px; }
+.qqaw-resize-ne,.qqaw-resize-se,.qqaw-resize-sw,.qqaw-resize-nw { width: 22px; height: 22px; }
 .qqaw-resize-ne { top: -3px; right: -3px; cursor: nesw-resize; }
 .qqaw-resize-se { right: -3px; bottom: -3px; cursor: nwse-resize; }
 .qqaw-resize-sw { left: -3px; bottom: -3px; cursor: nesw-resize; }
 .qqaw-resize-nw { left: -3px; top: -3px; cursor: nwse-resize; }
-
 .qqaw-resize-se::after {
     content: '';
     position: absolute;
-    right: 5px;
-    bottom: 5px;
-    width: 10px;
-    height: 10px;
+    right: 6px;
+    bottom: 6px;
+    width: 8px;
+    height: 8px;
     border-right: 2px solid currentColor;
     border-bottom: 2px solid currentColor;
-    opacity: .35;
+    opacity: .25;
 }
 
-@container (max-width: 700px) {
-    .qqaw-main-grid {
-        grid-template-columns: 1fr;
-        gap: 18px;
-    }
-
-    .qqaw-preview-shell {
-        width: min(68cqw, 300px);
-    }
+@container (max-width: 650px) {
+    .qqaw-main-grid { grid-template-columns: 1fr; gap: 9px; }
+    .qqaw-preview-shell { width: min(58cqw, 270px); }
+    .qqaw-history-list { grid-auto-columns: minmax(108px, 128px); }
 }
-
 @media (max-width: 720px) {
-    .qqaw-body {
-        padding-inline: 12px;
-        padding-bottom: calc(16px + env(safe-area-inset-bottom));
-    }
-
-    #qqaw-target-file {
-        max-width: 42vw;
-    }
+    .qqaw-body { padding: 10px; padding-bottom: calc(13px + env(safe-area-inset-bottom)); }
+    #qqaw-modal { border-radius: 19px; }
+    .qqaw-header { padding: 11px 12px 10px; }
+    .qqaw-title-icon { width: 29px; height: 29px; flex-basis: 29px; }
+    #qqaw-title { font-size: .93rem; }
+    #qqaw-subtitle { font-size: .63rem; }
+    .qqaw-target-row { margin-bottom: 9px; }
 }
 
-
-
-/* 设置页备用入口：用于某些主题/Tauri WebView 拦截消息区点击时兜底。 */
 .qqaw-settings-launcher {
     margin: 10px 0;
     padding: 10px;
-    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+    border-radius: 12px;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px 10px;
 }
-
-.qqaw-settings-launcher-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    margin-right: auto;
-}
-
-.qqaw-settings-launcher-title img {
-    width: 1.35em;
-    height: 1.35em;
-    object-fit: contain;
-}
-
-.qqaw-settings-launcher small {
-    flex-basis: 100%;
-    opacity: .65;
-}
-
-.qqaw-clear-chat-avatar {
-    width: 100%;
-    margin: 8px 0 2px;
-    opacity: .88;
-}
+.qqaw-settings-launcher-title { display: inline-flex; align-items: center; gap: 7px; margin-right: auto; }
+.qqaw-settings-launcher-title img { width: 1.35em; height: 1.35em; object-fit: contain; }
+.qqaw-settings-launcher small { flex-basis: 100%; opacity: .62; }
 
 /* “仅本次聊天”使用内部临时头像文件，不让它们挤进 Persona 头像列表。 */
-#user_avatar_block [imgfile^="__qqaw_chat_"] {
-    display: none !important;
-}
+#user_avatar_block [imgfile^="__qqaw_chat_"] { display: none !important; }

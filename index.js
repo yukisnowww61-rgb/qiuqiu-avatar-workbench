@@ -7,6 +7,10 @@
     const DEFAULT_ICON_URL = 'https://imgbed.heliar.top/i/hWLZsEjJm7_lklfn_IMG_1048.gif';
     const DEFAULT_LAYOUT = Object.freeze({ x: 50, y: 50, zoom: 1 });
     const DEFAULT_ASPECT = Object.freeze({ w: 2, h: 3, label: '2:3' });
+    const HISTORY_DB_NAME = 'qiuqiu_avatar_workbench';
+    const HISTORY_DB_VERSION = 1;
+    const HISTORY_STORE = 'avatarHistory';
+    const HISTORY_LIMIT = 8;
 
     let context;
     let settings;
@@ -18,6 +22,8 @@
     let modalMoveState = null;
     let modalResizeState = null;
     const launcherMap = new Map();
+    const historyObjectUrls = new Set();
+    let historyDbPromise = null;
     let state = createInitialState();
 
     function createInitialState() {
@@ -618,7 +624,7 @@
                         <img class="qqaw-title-icon" alt="" />
                         <div>
                             <div id="qqaw-title">丘丘头像工作台</div>
-                            <div id="qqaw-subtitle">快速更换 · 自由裁剪 · 非破坏式构图</div>
+                            <div id="qqaw-subtitle">快速更换 · 自由构图 · 历史回滚</div>
                         </div>
                     </div>
                     <div class="qqaw-window-actions">
@@ -692,8 +698,21 @@
                         </section>
                     </div>
 
+                    <section class="qqaw-history-card">
+                        <div class="qqaw-section-head">
+                            <div>
+                                <div class="qqaw-section-kicker">AVATAR HISTORY</div>
+                                <div class="qqaw-section-title">头像历史</div>
+                            </div>
+                            <button type="button" id="qqaw-clear-history" class="qqaw-text-button">清空</button>
+                        </div>
+                        <div id="qqaw-history-list" class="qqaw-history-list">
+                            <div class="qqaw-history-empty">替换头像后，这里会自动保存最近记录。</div>
+                        </div>
+                    </section>
+
                     <details class="qqaw-icon-settings">
-                        <summary>工作台图标设置</summary>
+                        <summary>工作台与入口设置</summary>
                         <div class="qqaw-icon-settings-grid">
                             <label>
                                 <span>图标 URL</span>
@@ -798,6 +817,8 @@
         $('#qqaw-pick-icon').addEventListener('click', () => $('#qqaw-icon-file').click());
         $('#qqaw-icon-file').addEventListener('change', applyLocalIcon);
         $('#qqaw-reset-icon').addEventListener('click', resetWorkbenchIcon);
+        $('#qqaw-clear-history').addEventListener('click', clearCurrentHistory);
+        $('#qqaw-history-list').addEventListener('click', handleHistoryClick);
         $('#qqaw-launcher-gap').addEventListener('input', () => {
             settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
             $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
@@ -976,6 +997,7 @@
                 message.querySelectorAll('.avatar img').forEach((img) => setFreshImageSource(img, fresh));
             });
             state.target.sourceUrl = fresh;
+            await forceCurrentChatAvatarRefresh(target);
             await loadTargetImage(true);
             refreshAllAvatarLayouts(document);
             syncReplaceScopeUi();
@@ -1007,6 +1029,7 @@
         shell.style.setProperty('--qqaw-aspect-h', 3);
         updatePreview();
         loadTargetImage(true);
+        renderHistory();
     }
 
     function closeWorkbench() {
@@ -1019,6 +1042,7 @@
         state.pointers.clear();
         state.pinchStart = null;
         state.dragging = false;
+        revokeHistoryObjectUrls();
     }
 
     function syncTargetUi() {
@@ -1048,6 +1072,7 @@
         syncTargetUi();
         updatePreview();
         loadTargetImage(true);
+        renderHistory();
     }
 
     function withCacheBust(url) {
@@ -1211,12 +1236,31 @@
         });
     }
 
+    function avatarUploadFile(blob, baseName = 'qiuqiu-avatar') {
+        const type = blob?.type || 'image/png';
+        const ext = type.includes('webp') ? 'webp'
+            : type.includes('gif') ? 'gif'
+                : type.includes('jpeg') || type.includes('jpg') ? 'jpg'
+                    : type.includes('avif') ? 'avif'
+                        : 'png';
+        return new File([blob], `${baseName}.${ext}`, { type });
+    }
+
+    function avatarExtension(blob) {
+        const type = blob?.type || '';
+        if (type.includes('webp')) return 'webp';
+        if (type.includes('gif')) return 'gif';
+        if (type.includes('jpeg') || type.includes('jpg')) return 'jpg';
+        if (type.includes('avif')) return 'avif';
+        return 'png';
+    }
+
     async function uploadChatScopedAvatar(target, blob) {
         const chatIdentity = getCurrentChatIdentity();
         const suffix = hashString(`${target.kind}|${target.key}|${target.name}`);
-        const file = `__qqaw_chat_${hashString(chatIdentity)}_${suffix}.png`;
+        const file = `__qqaw_chat_${hashString(chatIdentity)}_${suffix}.${avatarExtension(blob)}`;
         const formData = new FormData();
-        formData.append('avatar', new File([blob], 'qiuqiu-chat-avatar.png', { type: 'image/png' }));
+        formData.append('avatar', avatarUploadFile(blob, 'qiuqiu-chat-avatar'));
         formData.append('overwrite_name', file);
         const response = await fetch('/api/avatars/upload', {
             method: 'POST',
@@ -1230,6 +1274,228 @@
         setTimeout(() => refreshChatScopedOverride(target), 80);
         setTimeout(() => refreshChatScopedOverride(target), 300);
         return record;
+    }
+
+    function openHistoryDb() {
+        if (historyDbPromise) return historyDbPromise;
+        historyDbPromise = new Promise((resolve, reject) => {
+            if (!globalThis.indexedDB) {
+                reject(new Error('当前 WebView 不支持 IndexedDB。'));
+                return;
+            }
+            const request = indexedDB.open(HISTORY_DB_NAME, HISTORY_DB_VERSION);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+                    const store = db.createObjectStore(HISTORY_STORE, { keyPath: 'id' });
+                    store.createIndex('createdAt', 'createdAt');
+                }
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('头像历史数据库打开失败。'));
+        });
+        return historyDbPromise;
+    }
+
+    async function historyGetAll() {
+        const db = await openHistoryDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(HISTORY_STORE, 'readonly');
+            const req = tx.objectStore(HISTORY_STORE).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error || new Error('读取头像历史失败。'));
+        });
+    }
+
+    async function historyPut(record) {
+        const db = await openHistoryDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(HISTORY_STORE, 'readwrite');
+            tx.objectStore(HISTORY_STORE).put(record);
+            tx.oncomplete = () => resolve(record);
+            tx.onerror = () => reject(tx.error || new Error('保存头像历史失败。'));
+        });
+    }
+
+    async function historyDelete(id) {
+        const db = await openHistoryDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(HISTORY_STORE, 'readwrite');
+            tx.objectStore(HISTORY_STORE).delete(id);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('删除头像历史失败。'));
+        });
+    }
+
+    function historyTargetMatches(record, target) {
+        if (!record || !target || record.kind !== target.kind) return false;
+        if (target.kind === 'char' && record.charId != null && target.charId != null) {
+            return Number(record.charId) === Number(target.charId);
+        }
+        return Boolean(record.targetKey && target.key && record.targetKey === target.key)
+            || Boolean(record.targetName && target.name && record.targetName === target.name);
+    }
+
+    async function historyForTarget(target) {
+        const chatId = getCurrentChatIdentity();
+        const all = await historyGetAll();
+        return all
+            .filter((item) => historyTargetMatches(item, target))
+            .filter((item) => item.scope !== 'chat' || item.chatId === chatId)
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    }
+
+    function revokeHistoryObjectUrls() {
+        historyObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+        historyObjectUrls.clear();
+    }
+
+    function formatHistoryTime(value) {
+        try {
+            return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+        } catch {
+            return '';
+        }
+    }
+
+    async function fetchAvatarBlob(url) {
+        if (!url) throw new Error('找不到要备份的当前头像。');
+        const response = await fetch(withCacheBust(url), { cache: 'no-store' });
+        if (!response.ok) throw new Error(`读取当前头像失败（HTTP ${response.status}）。`);
+        return response.blob();
+    }
+
+    function permanentAvatarUrl(target) {
+        if (!target?.key) return target?.sourceUrl || '';
+        return target.kind === 'user'
+            ? `/User%20Avatars/${encodeURIComponent(target.key)}`
+            : `/characters/${encodeURIComponent(target.key)}`;
+    }
+
+    async function saveHistorySnapshot(target, scope) {
+        if (!target?.key) return null;
+        try {
+            const chatId = getCurrentChatIdentity();
+            const currentOverride = scope === 'chat' ? getChatOverrideForTarget(target) : null;
+            const sourceUrl = currentOverride ? chatOverrideUrl(currentOverride) : permanentAvatarUrl(target);
+            const blob = await fetchAvatarBlob(sourceUrl);
+            const record = {
+                id: globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                createdAt: Date.now(),
+                kind: target.kind,
+                targetKey: target.key || '',
+                targetName: target.name || '',
+                charId: target.charId,
+                scope: scope === 'chat' ? 'chat' : 'permanent',
+                chatId: scope === 'chat' ? chatId : '',
+                wasChatOverride: scope === 'chat' ? Boolean(currentOverride) : false,
+                type: blob.type || 'image/png',
+                blob,
+            };
+            await historyPut(record);
+            const records = await historyForTarget(target);
+            const sameScope = records.filter((item) => item.scope === record.scope && (record.scope !== 'chat' || item.chatId === chatId));
+            for (const item of sameScope.slice(HISTORY_LIMIT)) await historyDelete(item.id);
+            return record;
+        } catch (error) {
+            console.warn('[丘丘头像工作台] 保存头像历史失败，不阻止本次替换。', error);
+            return null;
+        }
+    }
+
+    async function renderHistory() {
+        const list = modal?.querySelector('#qqaw-history-list');
+        if (!list || !state.target) return;
+        revokeHistoryObjectUrls();
+        list.innerHTML = '<div class="qqaw-history-empty">正在读取头像历史…</div>';
+        try {
+            const records = await historyForTarget(state.target);
+            if (!records.length) {
+                list.innerHTML = '<div class="qqaw-history-empty">还没有历史记录。第一次替换头像后会自动保存旧头像。</div>';
+                return;
+            }
+            list.innerHTML = '';
+            records.forEach((record) => {
+                const url = URL.createObjectURL(record.blob);
+                historyObjectUrls.add(url);
+                const card = document.createElement('article');
+                card.className = 'qqaw-history-item';
+                card.dataset.historyId = record.id;
+                card.innerHTML = `
+                    <img class="qqaw-history-thumb" alt="历史头像" />
+                    <div class="qqaw-history-meta">
+                        <span class="qqaw-history-scope ${record.scope === 'chat' ? 'is-chat' : 'is-permanent'}">${record.scope === 'chat' ? '本次聊天' : '永久'}</span>
+                        <span class="qqaw-history-time">${formatHistoryTime(record.createdAt)}</span>
+                    </div>
+                    <div class="qqaw-history-actions">
+                        <button type="button" class="qqaw-history-rollback" data-action="rollback">一键回滚</button>
+                        <button type="button" class="qqaw-history-delete" data-action="delete" aria-label="删除这条历史" title="删除">×</button>
+                    </div>`;
+                card.querySelector('.qqaw-history-thumb').src = url;
+                list.append(card);
+            });
+        } catch (error) {
+            console.error('[丘丘头像工作台] 读取头像历史失败', error);
+            list.innerHTML = '<div class="qqaw-history-empty">当前环境暂时无法读取头像历史。</div>';
+        }
+    }
+
+    async function handleHistoryClick(event) {
+        const button = event.target.closest?.('[data-action]');
+        const card = event.target.closest?.('.qqaw-history-item');
+        if (!button || !card) return;
+        const id = card.dataset.historyId;
+        if (button.dataset.action === 'delete') {
+            await historyDelete(id);
+            await renderHistory();
+            return;
+        }
+        if (button.dataset.action !== 'rollback' || !state.target) return;
+        button.disabled = true;
+        const oldText = button.textContent;
+        button.textContent = '回滚中…';
+        try {
+            const records = await historyForTarget(state.target);
+            const record = records.find((item) => item.id === id);
+            if (!record) throw new Error('这条历史记录已经不存在。');
+            await saveHistorySnapshot(state.target, record.scope);
+            if (record.scope === 'chat') {
+                if (record.wasChatOverride === false) {
+                    await clearChatOverride(state.target);
+                } else {
+                    await uploadChatScopedAvatar(state.target, record.blob);
+                }
+            } else {
+                await clearChatOverride(state.target);
+                if (state.target.kind === 'user') {
+                    await uploadPersonaAvatar(state.target, record.blob);
+                } else {
+                    await uploadCharacterAvatar(state.target, record.blob);
+                }
+            }
+            await forceCurrentChatAvatarRefresh(state.target);
+            await loadTargetImage(true);
+            await renderHistory();
+            notify('success', `已回滚到 ${formatHistoryTime(record.createdAt)} 的头像。`);
+        } catch (error) {
+            console.error('[丘丘头像工作台] 回滚失败', error);
+            notify('error', error.message || '头像回滚失败。');
+        } finally {
+            button.disabled = false;
+            button.textContent = oldText;
+        }
+    }
+
+    async function clearCurrentHistory() {
+        if (!state.target) return;
+        try {
+            const records = await historyForTarget(state.target);
+            for (const record of records) await historyDelete(record.id);
+            await renderHistory();
+            notify('success', '当前头像的历史记录已清空。');
+        } catch (error) {
+            notify('error', error.message || '清空头像历史失败。');
+        }
     }
 
     function getFullAvatarUrl(target) {
@@ -1535,6 +1801,7 @@
         button.textContent = state.replaceScope === 'chat' ? '正在应用到本次聊天…' : '正在永久替换…';
         try {
             const blob = await renderCropBlob();
+            await saveHistorySnapshot(state.target, state.replaceScope);
             if (state.replaceScope === 'chat') {
                 await uploadChatScopedAvatar(state.target, blob);
             } else {
@@ -1552,10 +1819,12 @@
             state.file = null;
             state.sourceKind = 'current';
             revokeObjectUrl();
+            await forceCurrentChatAvatarRefresh(state.target);
             await loadTargetImage(true);
             applyChatScopedOverrides(document);
             refreshAllAvatarLayouts(document);
             updatePreview();
+            await renderHistory();
             notify(
                 'success',
                 state.replaceScope === 'chat'
@@ -1570,6 +1839,32 @@
             syncTargetUi();
             syncReplaceScopeUi();
         }
+    }
+
+    async function forceCurrentChatAvatarRefresh(target) {
+        const ctx = liveContext();
+        const chat = document.querySelector('#chat');
+        const distanceFromBottom = chat ? Math.max(0, chat.scrollHeight - chat.scrollTop - chat.clientHeight) : null;
+        try {
+            if (typeof ctx.reloadCurrentChat === 'function') {
+                await ctx.reloadCurrentChat();
+            }
+        } catch (error) {
+            console.warn('[丘丘头像工作台] reloadCurrentChat 失败，回退到 DOM 强制刷新。', error);
+        }
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        applyChatScopedOverrides(document);
+        refreshLiveAvatar(target);
+        scanMessages(document);
+        const nextChat = document.querySelector('#chat');
+        if (nextChat && distanceFromBottom != null) {
+            nextChat.scrollTop = Math.max(0, nextChat.scrollHeight - nextChat.clientHeight - distanceFromBottom);
+        }
+        setTimeout(() => {
+            applyChatScopedOverrides(document);
+            refreshLiveAvatar(target);
+            scanMessages(document);
+        }, 120);
     }
 
     function directAvatarUrl(target) {
@@ -1599,7 +1894,8 @@
     }
 
     function refreshLiveAvatar(target) {
-        const fresh = withCacheBust(directAvatarUrl(target));
+        const override = getChatOverrideForTarget(target);
+        const fresh = override ? withCacheBust(chatOverrideUrl(override)) : withCacheBust(directAvatarUrl(target));
         if (!fresh) return '';
 
         // 优先按“每条消息实际对应的 Persona / Character”匹配，兼容群聊和历史 Persona。
@@ -1631,7 +1927,7 @@
 
     async function uploadPersonaAvatar(target, blob) {
         const formData = new FormData();
-        formData.append('avatar', new File([blob], 'qiuqiu-avatar.png', { type: 'image/png' }));
+        formData.append('avatar', avatarUploadFile(blob));
         formData.append('overwrite_name', target.key);
 
         const response = await fetch('/api/avatars/upload', {
@@ -1705,7 +2001,7 @@
 
         const formData = new FormData();
         appendCharacterFormFields(formData, character);
-        formData.append('avatar', new File([blob], 'qiuqiu-avatar.png', { type: 'image/png' }));
+        formData.append('avatar', avatarUploadFile(blob));
 
         const response = await fetch('/api/characters/edit', {
             method: 'POST',
@@ -1825,7 +2121,7 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.4 已加载');
+            console.info('[丘丘头像工作台] v0.1.5 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
