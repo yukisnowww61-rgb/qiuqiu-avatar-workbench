@@ -11,6 +11,7 @@
     const HISTORY_DB_VERSION = 1;
     const HISTORY_STORE = 'avatarHistory';
     const HISTORY_LIMIT = 8;
+    const CHAT_STORE_VERSION = 2;
 
     let context;
     let settings;
@@ -997,6 +998,7 @@
         try {
             const target = { ...state.target };
             await clearChatOverride(target);
+            await syncCurrentChatToPermanentPersona(target);
             const fresh = withCacheBust(directAvatarUrl(target));
             document.querySelectorAll('#chat .mes:not(.template_element)').forEach((message) => {
                 const candidate = getTargetFromMessage(message);
@@ -1134,9 +1136,10 @@
         const ctx = liveContext();
         const metadata = ctx.chatMetadata;
         if (!metadata) return null;
-        if (!metadata[CHAT_METADATA_FIELD] && create) metadata[CHAT_METADATA_FIELD] = { version: 1, overrides: {} };
+        if (!metadata[CHAT_METADATA_FIELD] && create) metadata[CHAT_METADATA_FIELD] = { version: CHAT_STORE_VERSION, overrides: {} };
         const store = metadata[CHAT_METADATA_FIELD];
         if (store && !store.overrides && create) store.overrides = {};
+        if (store && create) store.version = CHAT_STORE_VERSION;
         return store || null;
     }
 
@@ -1161,6 +1164,71 @@
         if (!override?.file) return '';
         const base = `/User%20Avatars/${encodeURIComponent(override.file)}`;
         return `${base}?qqawchat=${encodeURIComponent(override.createdAt || Date.now())}`;
+    }
+
+    function chatMessageMatchesUserTarget(message, target) {
+        if (!message?.is_user || target?.kind !== 'user') return false;
+        const original = String(message.original_avatar || '');
+        if (target.key && original === target.key) return true;
+
+        const parsedForce = parseAvatarRef(message.force_avatar || '');
+        if (target.key && parsedForce?.file === target.key) return true;
+
+        // 临时头像写入后 force_avatar 会指向 __qqaw_chat_*，
+        // 此时 original_avatar 是回到原 Persona 的稳定锚点。
+        if (parsedForce?.file?.startsWith('__qqaw_chat_') && target.key && original === target.key) return true;
+
+        return Boolean(target.name && message.name && String(message.name).trim() === String(target.name).trim());
+    }
+
+    async function saveCurrentChatNow() {
+        const ctx = liveContext();
+        if (typeof ctx.saveChat === 'function') {
+            await ctx.saveChat();
+            return;
+        }
+        await persistChatMetadata({ flush: true });
+    }
+
+    async function syncUserMessagesToAvatar(target, avatarUrl) {
+        if (target?.kind !== 'user' || !avatarUrl) return 0;
+        const ctx = liveContext();
+        const messages = Array.isArray(ctx.chat) ? ctx.chat : [];
+        let changed = 0;
+
+        for (const message of messages) {
+            if (!chatMessageMatchesUserTarget(message, target)) continue;
+            message.original_avatar = target.key || message.original_avatar || '';
+            if (message.force_avatar !== avatarUrl) {
+                message.force_avatar = avatarUrl;
+                changed += 1;
+            }
+        }
+
+        if (changed) await saveCurrentChatNow();
+        return changed;
+    }
+
+    async function syncCurrentChatToPermanentPersona(target) {
+        if (target?.kind !== 'user') return;
+        const fresh = withCacheBust(directAvatarUrl(target));
+        await syncUserMessagesToAvatar(target, fresh);
+    }
+
+    async function migrateLegacyChatOverrideStore() {
+        const store = getChatOverrideStore(false);
+        if (!store) return false;
+        const version = Number(store.version || 1);
+        if (version >= CHAT_STORE_VERSION) return false;
+
+        const hadLegacyOverride = Object.keys(store.overrides || {}).length > 0;
+        // v0.1.4-v0.1.8 只在 DOM 层强压头像，容易留下“旧临时头像锁死”的状态。
+        // v2 改为写入 SillyTavern 自己的 message.force_avatar，因此旧活动覆盖不迁移，
+        // 首次升级主动清空一次，让当前聊天先恢复 Persona 的真实状态。
+        store.version = CHAT_STORE_VERSION;
+        store.overrides = {};
+        await persistChatMetadata({ flush: true });
+        return hadLegacyOverride;
     }
 
     async function persistChatMetadata({ flush = false } = {}) {
@@ -1226,7 +1294,7 @@
     function findChatOverrideForMessage(message) {
         if (!message) return null;
         const isUser = message.getAttribute('is_user') === 'true';
-        // v0.1.7 起聊天级头像只支持 USER，忽略旧版本可能遗留的 CHAR 临时覆盖。
+        // 聊天级头像只支持 USER，忽略旧版本可能遗留的 CHAR 临时覆盖。
         if (!isUser) return null;
         const kind = 'user';
         const name = message.querySelector('.name_text')?.textContent?.trim() || '';
@@ -1342,6 +1410,9 @@
 
         // 先写入聊天 metadata，并等它真正落盘，再允许后续 reloadCurrentChat。
         const record = await setChatOverride(target, file);
+        // 关键：不再只改 <img src>。SillyTavern 渲染 USER 消息时会优先读取
+        // message.force_avatar；把临时头像写到消息数据层，重进聊天也不会被永久头像抢回去。
+        await syncUserMessagesToAvatar(target, chatOverrideUrl(record));
         refreshChatScopedOverride(target);
         setTimeout(() => refreshChatScopedOverride(target), 80);
         setTimeout(() => refreshChatScopedOverride(target), 300);
@@ -1535,6 +1606,7 @@
             if (record.scope === 'chat') {
                 if (record.wasChatOverride === false) {
                     await clearChatOverride(state.target);
+                    await syncCurrentChatToPermanentPersona(state.target);
                 } else {
                     await uploadChatScopedAvatar(state.target, record.blob);
                 }
@@ -1542,11 +1614,12 @@
                 await clearChatOverride(state.target);
                 if (state.target.kind === 'user') {
                     await uploadPersonaAvatar(state.target, record.blob);
+                    await syncCurrentChatToPermanentPersona(state.target);
                 } else {
                     await uploadCharacterAvatar(state.target, record.blob);
                 }
             }
-            await forceCurrentChatAvatarRefresh(state.target, { reload: record.scope !== 'chat' || record.wasChatOverride === false });
+            await forceCurrentChatAvatarRefresh(state.target, { reload: true });
             await loadTargetImage(true);
             await renderHistory();
             notify('success', `已回滚到 ${formatHistoryTime(record.createdAt)} 的头像。`);
@@ -1883,6 +1956,7 @@
                 await clearChatOverride(state.target);
                 if (state.target.kind === 'user') {
                     await uploadPersonaAvatar(state.target, blob);
+                    await syncCurrentChatToPermanentPersona(state.target);
                 } else {
                     await uploadCharacterAvatar(state.target, blob);
                 }
@@ -1893,7 +1967,7 @@
             state.file = null;
             state.sourceKind = 'current';
             revokeObjectUrl();
-            await forceCurrentChatAvatarRefresh(state.target, { reload: state.replaceScope !== 'chat' });
+            await forceCurrentChatAvatarRefresh(state.target, { reload: true });
             await loadTargetImage(true);
             applyChatScopedOverrides(document);
             refreshAllAvatarLayouts(document);
@@ -1920,9 +1994,8 @@
         const chat = document.querySelector('#chat');
         const distanceFromBottom = chat ? Math.max(0, chat.scrollHeight - chat.scrollTop - chat.clientHeight) : null;
 
-        // 聊天级 USER 头像不再主动 reloadCurrentChat：重载本身会触发 ST 再写一次
-        // Persona 永久头像，从而造成“临时头像闪一下又变回永久头像”。
-        // 永久替换仍可使用 ST 的标准聊天重载流程。
+        // v0.1.9 起聊天级 USER 头像已写入 message.force_avatar。
+        // 因此可以安全走 SillyTavern 自己的重载流程，界面与聊天数据保持一致。
         if (reload) {
             try {
                 if (typeof ctx.reloadCurrentChat === 'function') {
@@ -2169,15 +2242,49 @@
                 scheduleChatOverrideReapply();
             }, 0);
         };
+
         [
             types.CHAT_CHANGED,
             types.CHARACTER_EDITED,
             types.PERSONA_CHANGED,
             types.PERSONA_UPDATED,
             types.MESSAGE_RECEIVED,
-            types.MESSAGE_SENT,
             types.MESSAGE_UPDATED,
         ].filter(Boolean).forEach((eventName) => source.on(eventName, refresh));
+
+        if (types.MESSAGE_SENT) {
+            source.on(types.MESSAGE_SENT, async (messageId) => {
+                try {
+                    const ctx = liveContext();
+                    const index = Number(messageId);
+                    const message = Number.isInteger(index) ? ctx.chat?.[index] : null;
+                    if (!message?.is_user) {
+                        refresh();
+                        return;
+                    }
+
+                    // 新发出的 USER 消息会由 ST 先写入 Persona 永久 force_avatar。
+                    // 当前聊天若启用了临时头像，在消息数据层立即改成聊天级头像。
+                    const overrides = allChatOverrides().filter((item) => item?.kind === 'user');
+                    const override = overrides.find((item) => {
+                        if (item.targetKey && message.original_avatar === item.targetKey) return true;
+                        const parsed = parseAvatarRef(message.force_avatar || '');
+                        if (item.targetKey && parsed?.file === item.targetKey) return true;
+                        return Boolean(item.targetName && message.name && item.targetName === message.name);
+                    }) || (overrides.length === 1 ? overrides[0] : null);
+
+                    if (override) {
+                        message.original_avatar = override.targetKey || message.original_avatar || '';
+                        message.force_avatar = chatOverrideUrl(override);
+                        await saveCurrentChatNow();
+                    }
+                } catch (error) {
+                    console.warn('[丘丘头像工作台] 新 USER 消息同步临时头像失败', error);
+                } finally {
+                    refresh();
+                }
+            });
+        }
     }
 
     function startObserver() {
@@ -2229,13 +2336,23 @@
         try {
             context = await waitForSillyTavern();
             ensureSettings();
+            const clearedLegacyOverride = await migrateLegacyChatOverrideStore();
             buildModal();
             bindGlobalLauncher();
             addSettingsLauncher();
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            console.info('[丘丘头像工作台] v0.1.8 已加载');
+            if (clearedLegacyOverride) {
+                const ctx = liveContext();
+                if (typeof ctx.reloadCurrentChat === 'function') {
+                    await ctx.reloadCurrentChat();
+                    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    scanMessages(document);
+                }
+                notify('info', '已清理旧版临时头像锁定状态。需要临时头像时请重新设置一次。');
+            }
+            console.info('[丘丘头像工作台] v0.1.9 已加载');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
