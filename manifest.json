@@ -1,13 +1,13 @@
 {
-  "display_name": "丘丘头像工作台",
-  "loading_order": 120,
-  "dependencies": [],
-  "js": "index.js",
-  "css": "style.css",
-  "author": "丘丘",
-  "version": "0.3.4",
-  "auto_update": true,
-  "requires": [],
-  "optional": [],
-  "homePage": "https://github.com/yukisnowww61-rgb/qiuqiu-avatar-workbench"
+    "display_name": "丘丘头像工作台",
+    "loading_order": 120,
+    "dependencies": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "丘丘",
+    "version": "0.3.5",
+    "auto_update": true,
+    "requires": [],
+    "optional": [],
+    "homePage": "https://github.com/yukisnowww61-rgb/qiuqiu-avatar-workbench"
 }

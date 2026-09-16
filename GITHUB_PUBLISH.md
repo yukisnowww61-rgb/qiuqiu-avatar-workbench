@@ -1,17 +1,18 @@
-# v0.3.4 发布
+# v0.3.5 发布
 
-本版修复普通主题下 USER 的 LIVE 头像框预览异常，同时保持蒙版头像入口不变。
+本版修复 USER 普通头像 LIVE 预览尺寸/位置错误，并新增姓名旁入口图标大小调节。
 
 ## 更新内容
 
-- 普通头像预览恢复 v0.3.0 的完整消息 DOM 骨架。
-- 普通模式重新保留 `.mes::before` / `.mes::after`，兼容把头像框、头图或气泡装饰写在消息伪元素上的主题。
-- 正文、姓名、三元素、编辑按钮与翻页按钮改为逐项隐藏，因此预览仍然不会出现聊天正文。
-- USER 预览尺寸优先读取原始 `.avatar img`，不再使用丘丘保护头像层作为主题几何基准。
-- 蒙版头像模式保持原有精简渲染逻辑。
+- USER LIVE 预览的几何位置改为读取当前真正显示的保护头像层。
+- mask / filter / opacity / object-fit 等视觉样式继续读取原始 `.avatar img`，避免破坏复杂主题兼容。
+- CHAR 保持原有单一头像几何逻辑。
+- 修复 LIVE 空状态提示文字在部分主题下残留的问题。
+- “工作台与入口设置”新增入口图标大小拉条（0.60×–2.50×）。
+- 图标大小与图标到姓名距离分开保存，并实时更新聊天中的丘丘入口。
 
 建议提交信息：
 
 ```text
-fix: restore plain user live preview compatibility v0.3.4
+fix: split user preview geometry and add launcher icon scale v0.3.5
 ```

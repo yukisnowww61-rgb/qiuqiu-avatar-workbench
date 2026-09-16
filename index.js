@@ -97,6 +97,7 @@
             characterLayouts: {},
             preferredAspect: '2:3',
             launcherGap: 2,
+            launcherIconScale: 1,
             replaceScope: 'permanent',
             modalRect: null,
             previewLayout: 'vertical',
@@ -115,6 +116,7 @@
         settings.personaLayouts ??= {};
         settings.characterLayouts ??= {};
         settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
+        settings.launcherIconScale = clamp(Number(settings.launcherIconScale ?? 1), 0.6, 2.5);
         settings.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
         settings.previewLayout = settings.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
         settings.themePreviewModes ??= {};
@@ -500,7 +502,8 @@
         const style = getComputedStyle(name);
         const fontSize = Number.parseFloat(style.fontSize) || 16;
         const measuredHeight = nameRect.height > 0 ? nameRect.height : fontSize;
-        const size = clamp(measuredHeight, 8, 48);
+        const iconScale = clamp(Number(settings.launcherIconScale ?? 1), 0.6, 2.5);
+        const size = clamp(measuredHeight * iconScale, 6, 96);
         const gap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
 
         // 这里使用“姓名坐标 - 宿主坐标”，得到宿主内部坐标。
@@ -907,10 +910,14 @@
                                 <button type="button" id="qqaw-reset-icon" class="menu_button">恢复默认</button>
                             </div>
                             <label class="qqaw-slider-row qqaw-gap-control">
+                                <span>入口图标大小 <output id="qqaw-icon-scale-value">1.00×</output></span>
+                                <input id="qqaw-launcher-icon-scale" type="range" min="0.6" max="2.5" step="0.05" value="1" />
+                            </label>
+                            <label class="qqaw-slider-row qqaw-gap-control">
                                 <span>图标到姓名距离 <output id="qqaw-gap-value">2 px</output></span>
                                 <input id="qqaw-launcher-gap" type="range" min="-24" max="60" step="1" value="2" />
                             </label>
-                            <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。负数会让图标更贴近姓名；入口固定在每条消息内部，会随该消息一起滚动。</div>
+                            <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。“入口图标大小”按姓名高度成比例缩放；负距离会让图标更贴近姓名。入口固定在每条消息内部，会随消息一起滚动。</div>
                         </div>
                     </details>
                 </div>
@@ -1076,6 +1083,12 @@
                 syncThemePreviewModeUi();
                 scheduleThemePreview();
             });
+        });
+        $('#qqaw-launcher-icon-scale').addEventListener('input', () => {
+            settings.launcherIconScale = clamp(Number($('#qqaw-launcher-icon-scale').value), 0.6, 2.5);
+            $('#qqaw-icon-scale-value').value = `${settings.launcherIconScale.toFixed(2)}×`;
+            saveSettings();
+            updateLauncherPositions();
         });
         $('#qqaw-launcher-gap').addEventListener('input', () => {
             settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
@@ -1925,6 +1938,8 @@
         document.body.classList.add('qqaw-modal-open');
         requestAnimationFrame(() => applyModalRect(settings.modalRect, false));
         modal.querySelector('#qqaw-icon-url').value = settings.iconUrl || DEFAULT_ICON_URL;
+        modal.querySelector('#qqaw-launcher-icon-scale').value = settings.launcherIconScale ?? 1;
+        modal.querySelector('#qqaw-icon-scale-value').value = `${Number(settings.launcherIconScale ?? 1).toFixed(2)}×`;
         modal.querySelector('#qqaw-launcher-gap').value = settings.launcherGap ?? 2;
         modal.querySelector('#qqaw-gap-value').value = `${settings.launcherGap ?? 2} px`;
         syncTargetUi();
@@ -3044,10 +3059,10 @@
         ctx2.drawImage(sourceCanvas, 0, 0, sw, sh, dx, dy, rw, rh);
     }
 
-    function copyThemeAvatarVisualStyle(source, canvas, sourceMessage, sourceAvatar) {
-        const sourceRect = source.getBoundingClientRect();
+    function copyThemeAvatarVisualStyle(styleSource, geometrySource, canvas, sourceMessage, sourceAvatar) {
+        const sourceRect = geometrySource.getBoundingClientRect();
         const avatarRect = sourceAvatar.getBoundingClientRect();
-        const cs = getComputedStyle(source);
+        const cs = getComputedStyle(styleSource);
         const important = (name, value) => {
             if (value != null && value !== '') canvas.style.setProperty(name, value, 'important');
         };
@@ -3097,17 +3112,19 @@
         const sourceMessage = representativeMessageForTarget(state.target);
         const sourceAvatar = sourceMessage?.querySelector('.avatar');
         const displayedImage = displayedAvatarElement(sourceMessage);
-        // LIVE 预览的几何与主题样式始终优先读取原始 .avatar img。
-        // USER 的保护头像只是最终显示层，可能带有运行时复制的内联样式；
-        // 如果把它继续当作主题基准，普通主题下会出现尺寸被二次换算、预览变小的问题。
+        // USER 与 CHAR 分开读取“几何”和“主题视觉样式”：
+        // - USER 的最终几何必须以屏幕上真正显示的 protected layer 为准；
+        // - mask/filter/object-fit 等主题样式仍以原始 .avatar img 为准。
+        // CHAR 没有保护层，因此两者通常是同一个 img。
         const sourceImage = sourceAvatar?.querySelector('img:not(.qqaw-protected-user-avatar)') || displayedImage;
-        if (!sourceMessage || !sourceAvatar || !sourceImage) {
+        const geometryImage = displayedImage || sourceImage;
+        if (!sourceMessage || !sourceAvatar || !sourceImage || !geometryImage) {
             empty.hidden = false;
             empty.textContent = '当前聊天中暂时找不到可镜像的同类型头像框。';
             return;
         }
         const messageRect = sourceMessage.getBoundingClientRect();
-        const imageRect = sourceImage.getBoundingClientRect();
+        const imageRect = geometryImage.getBoundingClientRect();
         if (!messageRect.width || !messageRect.height || !imageRect.width || !imageRect.height) {
             empty.hidden = false;
             empty.textContent = '当前头像框尚未完成布局，稍后再试。';
@@ -3176,7 +3193,7 @@
         candidate.className = 'qqaw-theme-preview-avatar';
         candidate.width = Math.max(96, Math.min(768, Math.round(imageRect.width * 2)));
         candidate.height = Math.max(96, Math.min(768, Math.round(imageRect.height * 2)));
-        const sourceStyle = copyThemeAvatarVisualStyle(sourceImage, candidate, sourceMessage, sourceAvatar);
+        const sourceStyle = copyThemeAvatarVisualStyle(sourceImage, geometryImage, candidate, sourceMessage, sourceAvatar);
         drawObjectFitPreview(sourceCanvas, candidate, sourceStyle);
         cloneAvatar.append(candidate);
 

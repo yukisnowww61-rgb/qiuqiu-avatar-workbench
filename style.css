@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.3.2 · clean pastel studio UI */
+/* 丘丘头像工作台 v0.3.5 · clean pastel studio UI */
 
 .qqaw-name-button {
     appearance: none;
@@ -1043,6 +1043,10 @@
     box-shadow: 0 12px 28px rgb(64 48 55 / 8%), inset 0 1px 0 rgb(255 255 255 / 72%) !important;
 }
 #qqaw-modal .qqaw-preview-shell { border-radius: 17px !important; }
+#qqaw-modal .qqaw-theme-preview-empty[hidden] {
+    display: none !important;
+}
+
 #qqaw-modal .qqaw-theme-preview-viewport {
     border-radius: 15px !important;
     background:
