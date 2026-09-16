@@ -3096,7 +3096,11 @@
         }
         const sourceMessage = representativeMessageForTarget(state.target);
         const sourceAvatar = sourceMessage?.querySelector('.avatar');
-        const sourceImage = displayedAvatarElement(sourceMessage);
+        const displayedImage = displayedAvatarElement(sourceMessage);
+        // LIVE 预览的几何与主题样式始终优先读取原始 .avatar img。
+        // USER 的保护头像只是最终显示层，可能带有运行时复制的内联样式；
+        // 如果把它继续当作主题基准，普通主题下会出现尺寸被二次换算、预览变小的问题。
+        const sourceImage = sourceAvatar?.querySelector('img:not(.qqaw-protected-user-avatar)') || displayedImage;
         if (!sourceMessage || !sourceAvatar || !sourceImage) {
             empty.hidden = false;
             empty.textContent = '当前聊天中暂时找不到可镜像的同类型头像框。';
@@ -3127,19 +3131,18 @@
             avatarClone.querySelectorAll('img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
             clone.append(avatarClone);
         } else {
-            // 普通模式：保留完整消息 DOM 骨架，维持普通主题依赖的 flex/grid/祖先选择器和尺寸关系。
-            // 整条 clone 使用 visibility:hidden 保留布局，再单独把 avatar subtree 打开，
-            // 因此正文、姓名、三元素和按钮都不可见，但它们仍参与原始排版计算。
+            // 普通模式：恢复 v0.3.0 的完整消息镜像骨架。
+            // 关键点：不能把整条 .mes visibility:hidden，因为 visibility 会连同
+            // .mes::before / .mes::after 一起隐藏，而很多普通美化恰好把头像框、
+            // 顶图和背景装饰画在这些伪元素上。正文等内容交给专用 CSS 单独隐藏。
             clone = sourceMessage.cloneNode(true);
             clone.classList.add('qqaw-theme-preview-message', 'qqaw-preview-plain');
             clone.setAttribute('aria-hidden', 'true');
             clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
             clone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
             avatarClone = clone.querySelector('.avatar');
-            clone.style.setProperty('visibility', 'hidden', 'important');
             if (avatarClone) {
-                avatarClone.style.setProperty('visibility', 'visible', 'important');
-                avatarClone.querySelectorAll('*').forEach((node) => node.style.setProperty('visibility', 'visible', 'important'));
+                // 隐藏克隆中的旧头像，只留下随后插入的实时 candidate。
                 avatarClone.querySelectorAll('img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
             }
             clone.querySelectorAll('button, input, textarea, select, a').forEach((node) => node.setAttribute('tabindex', '-1'));
@@ -3771,7 +3774,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.3.3 已加载（普通 / 蒙版双预览入口）');
+            console.info('[丘丘头像工作台] v0.3.4 已加载（普通预览恢复 v0.3.0 骨架）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

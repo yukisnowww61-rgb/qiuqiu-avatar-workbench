@@ -1057,9 +1057,10 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--qqaw-blue) 18%, transparent) !important;
 }
 
-/* LIVE 只显示头像容器：主动关闭 message 自身的气泡伪元素，避免正文区/气泡装饰进入预览。 */
-#qqaw-modal .qqaw-theme-preview-message::before,
-#qqaw-modal .qqaw-theme-preview-message::after {
+/* 蒙版模式只抽取头像容器，因此可以关闭 message 自身伪元素。
+   普通模式绝不能关闭这些伪元素：很多普通美化的头像框/头图就在 .mes::before / ::after 上。 */
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-mask::before,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-mask::after {
     content: none !important;
     display: none !important;
     background: none !important;
@@ -1069,10 +1070,34 @@
 #qqaw-modal .qqaw-theme-preview-message.qqaw-preview-mask > :not(.avatar) { display: none !important; }
 #qqaw-modal .qqaw-theme-preview-message.qqaw-preview-mask .avatar { visibility: visible !important; }
 
-/* 普通模式保留完整 DOM 排版骨架，只隐藏视觉内容；avatar subtree 单独恢复可见。 */
-#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain { visibility: hidden !important; }
+/* 普通模式：完整保留 v0.3.0 的消息布局与 .mes 伪元素，只隐藏文字/按钮本身。
+   不再对整条消息使用 visibility:hidden，避免 USER 的普通头像框一起消失。 */
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain {
+    visibility: visible !important;
+}
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mes_text,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mes_reasoning_details,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mes_reasoning,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .ch_name,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .name_text,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .timestamp,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mesIDDisplay,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .tokenCounterDisplay,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mes_timer,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mes_buttons,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .extraMesButtons,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .mes_edit_buttons,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .swipe_left,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .swipe_right,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .swipes-counter,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .del_checkbox,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .qqaw-name-button {
+    visibility: hidden !important;
+}
 #qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .avatar,
-#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .avatar * { visibility: visible !important; }
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .avatar * {
+    visibility: visible !important;
+}
 
 
 #qqaw-modal .qqaw-theme-preview-mode-row {
@@ -1262,3 +1287,11 @@
     #qqaw-modal .qqaw-card-heading { margin-bottom: 9px; }
     #qqaw-modal .qqaw-card-caption { display: none; }
 }
+
+
+/* =========================================================
+   v0.3.4 · 普通 USER LIVE 预览兼容修复
+   - 普通模式恢复 v0.3.0 完整消息骨架
+   - 只隐藏正文/姓名/三元素/按钮，不隐藏 .mes::before / ::after
+   - USER 预览几何优先读取原始 avatar img，而非保护显示层
+   ========================================================= */

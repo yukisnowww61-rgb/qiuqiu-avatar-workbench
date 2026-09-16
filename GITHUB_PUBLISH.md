@@ -1,19 +1,17 @@
-# v0.3.3 发布
+# v0.3.4 发布
 
-## 本次更新
+本版修复普通主题下 USER 的 LIVE 头像框预览异常，同时保持蒙版头像入口不变。
 
-- LIVE 头像框预览改为只镜像头像容器，不再显示消息正文、姓名、三元素与操作按钮。
-- 保留 mask / transform / filter / `.avatar::after` 等头像框视觉。
-- 重做工作台 UI：更清晰的卡片层级、模式切换、按钮、滑杆与历史收藏区域。
-- 加强插件面板样式隔离，降低 SillyTavern 美化 CSS 对丘丘工作台 UI 的影响。
+## 更新内容
 
-建议覆盖仓库根目录：`index.js`、`style.css`、`manifest.json`、`README.md`。
+- 普通头像预览恢复 v0.3.0 的完整消息 DOM 骨架。
+- 普通模式重新保留 `.mes::before` / `.mes::after`，兼容把头像框、头图或气泡装饰写在消息伪元素上的主题。
+- 正文、姓名、三元素、编辑按钮与翻页按钮改为逐项隐藏，因此预览仍然不会出现聊天正文。
+- USER 预览尺寸优先读取原始 `.avatar img`，不再使用丘丘保护头像层作为主题几何基准。
+- 蒙版头像模式保持原有精简渲染逻辑。
 
-Commit 建议：
+建议提交信息：
 
 ```text
-feat: simplify live avatar preview and polish studio UI v0.3.3
+fix: restore plain user live preview compatibility v0.3.4
 ```
-
-
-v0.3.3 新增普通头像 / 蒙版头像双 LIVE 预览入口，并按主题分别记忆。
