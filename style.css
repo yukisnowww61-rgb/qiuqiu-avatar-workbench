@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.3.0 · compact cute glass UI */
+/* 丘丘头像工作台 v0.3.2 · clean pastel studio UI */
 
 .qqaw-name-button {
     appearance: none;
@@ -849,4 +849,352 @@
     .qqaw-background-summary-text { align-items: flex-start; text-align: left; }
     .qqaw-bg-scope-row { gap: 4px; }
     .qqaw-bg-scope-button { padding-inline: 8px; }
+}
+
+
+/* =========================================================
+   v0.3.2 · Clean Pastel Studio UI
+   - 更清晰的层级与留白
+   - LIVE 头像框预览不显示正文/姓名/三元素
+   - 尽量隔离酒馆主题对通用 .menu_button / range 的覆盖
+   ========================================================= */
+
+#qqaw-modal {
+    --qqaw-pink: var(--SmartThemeQuoteColor, #f3a6b8);
+    --qqaw-blue: var(--SmartThemeLinkColor, #7bcfe5);
+    --qqaw-ink: var(--SmartThemeBodyColor, #3d3438);
+    --qqaw-card: color-mix(in srgb, #fff 82%, transparent);
+    --qqaw-card-strong: color-mix(in srgb, #fff 93%, transparent);
+    --qqaw-line: color-mix(in srgb, var(--qqaw-ink) 10%, transparent);
+    --qqaw-line-soft: color-mix(in srgb, var(--qqaw-ink) 6%, transparent);
+    --qqaw-shadow: 0 10px 30px rgb(69 50 60 / 7%);
+    --qqaw-shadow-soft: 0 4px 14px rgb(69 50 60 / 5%);
+    border-radius: 26px !important;
+    border: 1px solid color-mix(in srgb, var(--qqaw-pink) 24%, var(--qqaw-line)) !important;
+    background:
+        radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--qqaw-pink) 13%, transparent), transparent 29%),
+        radial-gradient(circle at 100% 2%, color-mix(in srgb, var(--qqaw-blue) 9%, transparent), transparent 25%),
+        linear-gradient(180deg, color-mix(in srgb, #fff 92%, transparent), color-mix(in srgb, #fff 78%, transparent)) !important;
+    box-shadow: 0 30px 90px rgb(47 35 41 / 22%), 0 8px 28px rgb(47 35 41 / 9%) !important;
+    backdrop-filter: blur(22px) saturate(1.08) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(1.08) !important;
+}
+
+#qqaw-modal,
+#qqaw-modal * { box-sizing: border-box; }
+
+#qqaw-modal .qqaw-header {
+    padding: 14px 16px 13px !important;
+    background: color-mix(in srgb, #fff 76%, transparent) !important;
+    border-bottom: 1px solid var(--qqaw-line-soft) !important;
+    box-shadow: 0 1px 0 rgb(255 255 255 / 62%) inset !important;
+}
+#qqaw-modal .qqaw-title-icon {
+    width: 34px !important;
+    height: 34px !important;
+    flex-basis: 34px !important;
+    padding: 3px !important;
+    border-radius: 11px !important;
+    background: color-mix(in srgb, #fff 70%, transparent) !important;
+    box-shadow: var(--qqaw-shadow-soft) !important;
+}
+#qqaw-modal #qqaw-title { font-size: 1.02rem !important; font-weight: 780 !important; }
+#qqaw-modal #qqaw-subtitle { margin-top: 3px !important; opacity: .5 !important; letter-spacing: .025em !important; }
+#qqaw-modal .qqaw-icon-button {
+    border-radius: 12px !important;
+    border: 1px solid var(--qqaw-line-soft) !important;
+    background: color-mix(in srgb, #fff 76%, transparent) !important;
+    box-shadow: var(--qqaw-shadow-soft) !important;
+}
+
+#qqaw-modal .qqaw-body { padding: 14px 15px 18px !important; }
+
+#qqaw-modal .qqaw-workbench-mode-row {
+    width: fit-content !important;
+    margin: 0 auto 12px !important;
+    padding: 4px !important;
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 15px !important;
+    background: color-mix(in srgb, #fff 64%, transparent) !important;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 72%), var(--qqaw-shadow-soft) !important;
+}
+#qqaw-modal .qqaw-workbench-mode-button {
+    min-width: 76px !important;
+    min-height: 34px !important;
+    padding: 6px 16px !important;
+    border: 0 !important;
+    border-radius: 11px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: inherit !important;
+    font-size: .74rem !important;
+    font-weight: 760 !important;
+    opacity: .52 !important;
+}
+#qqaw-modal .qqaw-workbench-mode-button.active {
+    opacity: 1 !important;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--qqaw-pink) 17%, #fff),
+        color-mix(in srgb, var(--qqaw-blue) 8%, #fff)) !important;
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--qqaw-pink) 12%, transparent) !important;
+}
+
+#qqaw-modal .qqaw-target-row,
+#qqaw-modal .qqaw-background-summary {
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 16px !important;
+    background: var(--qqaw-card) !important;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 72%), var(--qqaw-shadow-soft) !important;
+}
+#qqaw-modal .qqaw-target-row { padding: 8px !important; }
+#qqaw-modal .qqaw-target-button {
+    min-height: 30px !important;
+    padding: 5px 11px !important;
+    border: 1px solid transparent !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: inherit !important;
+}
+#qqaw-modal .qqaw-target-button.active {
+    background: color-mix(in srgb, var(--qqaw-pink) 14%, #fff) !important;
+    border-color: color-mix(in srgb, var(--qqaw-pink) 24%, transparent) !important;
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--qqaw-pink) 9%, transparent) !important;
+}
+
+#qqaw-modal .qqaw-main-grid,
+#qqaw-modal .qqaw-bg-main-grid { gap: 12px !important; }
+#qqaw-modal .qqaw-preview-panel,
+#qqaw-modal .qqaw-controls-panel,
+#qqaw-modal .qqaw-favorites-card,
+#qqaw-modal .qqaw-history-card,
+#qqaw-modal .qqaw-icon-settings,
+#qqaw-modal .qqaw-bg-controls-panel {
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 19px !important;
+    background: var(--qqaw-card) !important;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 74%), var(--qqaw-shadow) !important;
+}
+#qqaw-modal .qqaw-preview-panel,
+#qqaw-modal .qqaw-controls-panel { padding: 14px !important; }
+
+#qqaw-modal .qqaw-card-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 11px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--qqaw-line-soft);
+}
+#qqaw-modal .qqaw-card-title {
+    margin-top: 1px;
+    font-size: .86rem;
+    line-height: 1.25;
+    font-weight: 780;
+    letter-spacing: .01em;
+}
+#qqaw-modal .qqaw-card-caption {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--qqaw-blue) 8%, #fff);
+    color: color-mix(in srgb, var(--qqaw-ink) 62%, transparent);
+    font-size: .56rem;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+#qqaw-modal .qqaw-section-kicker {
+    color: color-mix(in srgb, var(--qqaw-pink) 70%, var(--qqaw-ink)) !important;
+    font-size: .53rem !important;
+    letter-spacing: .14em !important;
+    font-weight: 820 !important;
+}
+
+#qqaw-modal .qqaw-preview-layout-toolbar {
+    margin-bottom: 10px !important;
+    padding: 0 1px !important;
+}
+#qqaw-modal .qqaw-preview-layout-switch {
+    padding: 3px !important;
+    border: 1px solid var(--qqaw-line-soft) !important;
+    background: color-mix(in srgb, var(--qqaw-ink) 3%, #fff 97%) !important;
+    border-radius: 11px !important;
+}
+#qqaw-modal .qqaw-preview-layout-button {
+    min-width: 50px !important;
+    min-height: 26px !important;
+    padding: 4px 10px !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    color: inherit !important;
+    box-shadow: none !important;
+}
+#qqaw-modal .qqaw-preview-layout-button.active {
+    background: #fff !important;
+    opacity: 1 !important;
+    box-shadow: 0 3px 10px rgb(65 47 56 / 7%) !important;
+}
+
+#qqaw-modal .qqaw-preview-shell,
+#qqaw-modal .qqaw-theme-preview-viewport,
+#qqaw-modal .qqaw-bg-preview-shell {
+    border: 1px solid color-mix(in srgb, var(--qqaw-pink) 18%, var(--qqaw-line-soft)) !important;
+    box-shadow: 0 12px 28px rgb(64 48 55 / 8%), inset 0 1px 0 rgb(255 255 255 / 72%) !important;
+}
+#qqaw-modal .qqaw-preview-shell { border-radius: 17px !important; }
+#qqaw-modal .qqaw-theme-preview-viewport {
+    border-radius: 15px !important;
+    background:
+        radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--qqaw-blue) 6%, transparent), transparent 46%),
+        linear-gradient(180deg, color-mix(in srgb, #fff 88%, transparent), color-mix(in srgb, #fff 64%, transparent)) !important;
+}
+#qqaw-modal .qqaw-live-badge {
+    min-height: 20px !important;
+    padding: 2px 7px !important;
+    border: 0 !important;
+    background: color-mix(in srgb, var(--qqaw-blue) 11%, #fff) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--qqaw-blue) 18%, transparent) !important;
+}
+
+/* LIVE 只显示头像容器：主动关闭 message 自身的气泡伪元素，避免正文区/气泡装饰进入预览。 */
+#qqaw-modal .qqaw-theme-preview-message::before,
+#qqaw-modal .qqaw-theme-preview-message::after {
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+#qqaw-modal .qqaw-theme-preview-message > :not(.avatar) { display: none !important; }
+#qqaw-modal .qqaw-theme-preview-message .avatar { visibility: visible !important; }
+
+#qqaw-modal .qqaw-control-title {
+    margin-bottom: 7px !important;
+    font-size: .72rem !important;
+    font-weight: 780 !important;
+    color: color-mix(in srgb, var(--qqaw-ink) 80%, transparent) !important;
+}
+#qqaw-modal .qqaw-fixed-ratio {
+    border: 0 !important;
+    border-radius: 10px !important;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--qqaw-blue) 7%, #fff),
+        color-mix(in srgb, var(--qqaw-pink) 5%, #fff)) !important;
+    box-shadow: inset 0 0 0 1px var(--qqaw-line-soft) !important;
+}
+#qqaw-modal .qqaw-divider {
+    height: 1px !important;
+    margin: 14px 0 !important;
+    background: var(--qqaw-line-soft) !important;
+}
+#qqaw-modal .qqaw-small-note { opacity: .5 !important; }
+
+/* 隔离美化主题对通用按钮的重写。 */
+#qqaw-modal .menu_button,
+#qqaw-modal .qqaw-text-button,
+#qqaw-modal .qqaw-history-rollback,
+#qqaw-modal .qqaw-history-delete,
+#qqaw-modal .qqaw-favorite-toggle,
+#qqaw-modal .qqaw-scope-button {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 11px !important;
+    outline: none !important;
+    background: color-mix(in srgb, #fff 83%, transparent) !important;
+    color: inherit !important;
+    box-shadow: 0 3px 10px rgb(65 47 56 / 4%) !important;
+    text-shadow: none !important;
+    -webkit-text-stroke: 0 !important;
+    filter: none !important;
+}
+#qqaw-modal .menu_button:hover,
+#qqaw-modal .qqaw-text-button:hover,
+#qqaw-modal .qqaw-history-rollback:hover {
+    background: color-mix(in srgb, var(--qqaw-pink) 7%, #fff) !important;
+    border-color: color-mix(in srgb, var(--qqaw-pink) 20%, var(--qqaw-line-soft)) !important;
+}
+#qqaw-modal .qqaw-primary,
+#qqaw-modal #qqaw-replace-avatar,
+#qqaw-modal #qqaw-bg-save {
+    border-color: color-mix(in srgb, var(--qqaw-pink) 25%, transparent) !important;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--qqaw-pink) 18%, #fff),
+        color-mix(in srgb, var(--qqaw-blue) 8%, #fff)) !important;
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--qqaw-pink) 10%, transparent) !important;
+}
+
+#qqaw-modal .qqaw-scope-row,
+#qqaw-modal .qqaw-bg-scope-row {
+    padding: 4px !important;
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 13px !important;
+    background: color-mix(in srgb, var(--qqaw-ink) 2.5%, #fff 97.5%) !important;
+}
+#qqaw-modal .qqaw-scope-button { box-shadow: none !important; background: transparent !important; }
+#qqaw-modal .qqaw-scope-button.active {
+    background: #fff !important;
+    border-color: color-mix(in srgb, var(--qqaw-pink) 18%, transparent) !important;
+    box-shadow: 0 3px 10px rgb(65 47 56 / 6%) !important;
+}
+
+/* 滑杆统一成轻量 Studio 风格，避免当前美化的全局 range 样式侵入。 */
+#qqaw-modal input[type="range"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 100% !important;
+    height: 18px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    outline: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+#qqaw-modal input[type="range"]::-webkit-slider-runnable-track {
+    height: 5px !important;
+    border: 0 !important;
+    outline: 0 !important;
+    border-radius: 999px !important;
+    background: linear-gradient(90deg,
+        color-mix(in srgb, var(--qqaw-pink) 26%, #eee),
+        color-mix(in srgb, var(--qqaw-blue) 22%, #eee)) !important;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 6%) !important;
+}
+#qqaw-modal input[type="range"]::-webkit-slider-thumb {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 17px !important;
+    height: 17px !important;
+    margin-top: -6px !important;
+    border: 3px solid #fff !important;
+    border-radius: 999px !important;
+    background: color-mix(in srgb, var(--qqaw-pink) 72%, #fff) !important;
+    box-shadow: 0 2px 7px rgb(70 48 58 / 18%) !important;
+}
+
+#qqaw-modal .qqaw-favorites-card,
+#qqaw-modal .qqaw-history-card { padding: 13px !important; }
+#qqaw-modal .qqaw-section-head { margin-bottom: 10px !important; }
+#qqaw-modal .qqaw-history-item {
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 14px !important;
+    background: var(--qqaw-card-strong) !important;
+    box-shadow: 0 5px 15px rgb(65 47 56 / 5%) !important;
+}
+#qqaw-modal .qqaw-history-thumb { border-radius: 10px !important; }
+#qqaw-modal .qqaw-history-empty {
+    border-color: color-mix(in srgb, var(--qqaw-pink) 18%, var(--qqaw-line-soft)) !important;
+    background: color-mix(in srgb, #fff 40%, transparent) !important;
+}
+
+#qqaw-modal .qqaw-icon-settings > summary {
+    padding: 11px 13px !important;
+    border-radius: 18px !important;
+}
+
+@container (max-width: 650px) {
+    #qqaw-modal .qqaw-card-heading { margin-bottom: 9px; }
+    #qqaw-modal .qqaw-card-caption { display: none; }
 }

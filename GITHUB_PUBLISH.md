@@ -1,23 +1,16 @@
-# v0.3.1 发布
+# v0.3.2 发布
 
-将本目录内的文件上传并覆盖到仓库根目录：
+## 本次更新
 
-```text
-https://github.com/yukisnowww61-rgb/qiuqiu-avatar-workbench
-```
+- LIVE 头像框预览改为只镜像头像容器，不再显示消息正文、姓名、三元素与操作按钮。
+- 保留 mask / transform / filter / `.avatar::after` 等头像框视觉。
+- 重做工作台 UI：更清晰的卡片层级、模式切换、按钮、滑杆与历史收藏区域。
+- 加强插件面板样式隔离，降低 SillyTavern 美化 CSS 对丘丘工作台 UI 的影响。
 
-至少覆盖：
+建议覆盖仓库根目录：`index.js`、`style.css`、`manifest.json`、`README.md`。
 
-- `index.js`
-- `manifest.json`
-- `README.md`
-
-`style.css` 本版没有关键改动，但整包覆盖也没有问题。
-
-建议提交信息：
+Commit 建议：
 
 ```text
-fix: support masked and decorated avatar themes v0.3.1
+feat: simplify live avatar preview and polish studio UI v0.3.2
 ```
-
-本版把 USER 头像保护层迁回 `.avatar` 容器，修复复杂主题中头像被气泡/头像装饰层盖住而消失的问题，并同步 transform、mask 与 z-index 等主题视觉属性。

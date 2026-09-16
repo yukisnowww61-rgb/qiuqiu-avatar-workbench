@@ -693,6 +693,13 @@
 
                     <div class="qqaw-main-grid">
                         <section class="qqaw-preview-panel">
+                            <div class="qqaw-card-heading">
+                                <div>
+                                    <div class="qqaw-section-kicker">AVATAR PREVIEW</div>
+                                    <div class="qqaw-card-title">头像构图</div>
+                                </div>
+                                <span class="qqaw-card-caption">调整 · 实时预览</span>
+                            </div>
                             <div class="qqaw-preview-layout-toolbar">
                                 <span class="qqaw-preview-layout-label">预览排版</span>
                                 <div class="qqaw-preview-layout-switch" role="group" aria-label="预览排版">
@@ -723,12 +730,19 @@
                                     <div id="qqaw-theme-preview-viewport" class="qqaw-theme-preview-viewport">
                                         <div id="qqaw-theme-preview-empty" class="qqaw-theme-preview-empty">正在读取当前聊天的头像框…</div>
                                     </div>
-                                    <div class="qqaw-small-note">镜像当前聊天中同类型消息的真实头像位置、遮罩、滤镜与头像框。拖动或缩放左侧/上方图片时，这里会同步预览最终效果，但不会改动聊天内容。</div>
+                                    <div class="qqaw-small-note">只读取当前聊天同类型消息的头像容器、遮罩、滤镜与头像装饰，不复制正文、姓名或三元素。拖动或缩放图片时，这里会同步预览最终效果。</div>
                                 </div>
                             </div>
                         </section>
 
                         <section class="qqaw-controls-panel">
+                            <div class="qqaw-card-heading">
+                                <div>
+                                    <div class="qqaw-section-kicker">ADJUST</div>
+                                    <div class="qqaw-card-title">构图与替换</div>
+                                </div>
+                                <span class="qqaw-card-caption">精细调整</span>
+                            </div>
                             <div class="qqaw-control-block">
                                 <div class="qqaw-control-title">裁剪输出</div>
                                 <div class="qqaw-fixed-ratio">2:3 · 512 × 768 · 只裁切，不拉伸原图</div>
@@ -3053,13 +3067,18 @@
             return;
         }
 
-        const clone = sourceMessage.cloneNode(true);
+        // LIVE 预览只镜像头像容器，不再克隆消息正文、姓名、三元素或操作按钮。
+        // 使用空的 message shell 保留 `.mes[is_user=...] .avatar` 这类主题选择器，
+        // 再仅放入 avatar clone，因此头像自身的 ::after 装饰 / mask / transform 仍能继承主题。
+        const clone = sourceMessage.cloneNode(false);
         clone.classList.add('qqaw-theme-preview-message');
         clone.setAttribute('aria-hidden', 'true');
-        clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
-        clone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
-        clone.querySelectorAll('.avatar img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
-        clone.querySelectorAll('button, input, textarea, select, a').forEach((node) => node.setAttribute('tabindex', '-1'));
+        clone.removeAttribute('id');
+        const avatarClone = sourceAvatar.cloneNode(true);
+        avatarClone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+        avatarClone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
+        avatarClone.querySelectorAll('img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
+        clone.append(avatarClone);
         const sourceDisplay = getComputedStyle(sourceMessage).display;
         clone.style.setProperty('position', 'absolute', 'important');
         clone.style.setProperty('left', '0px', 'important');
@@ -3686,7 +3705,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.3.0 已加载（头像 + 背景工作台）');
+            console.info('[丘丘头像工作台] v0.3.2 已加载（精简 LIVE 预览 + Studio UI）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
