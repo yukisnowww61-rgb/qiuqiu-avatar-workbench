@@ -1,4 +1,4 @@
-# v0.3.5 发布
+# v0.3.6 发布
 
 本版修复 USER 普通头像 LIVE 预览尺寸/位置错误，并新增姓名旁入口图标大小调节。
 
@@ -14,5 +14,8 @@
 建议提交信息：
 
 ```text
-fix: split user preview geometry and add launcher icon scale v0.3.5
+fix: split user preview geometry and add launcher icon scale v0.3.6
 ```
+
+
+v0.3.6：修复 flex/grid 主题下 USER 保护头像参与布局导致的半边空白；保护层改为绝对叠加。

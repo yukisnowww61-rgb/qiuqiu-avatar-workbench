@@ -1,10 +1,10 @@
-# 丘丘头像工作台 v0.3.5
+# 丘丘头像工作台 v0.3.6
 
 一个面向 SillyTavern / TauriTavern 的 **头像 + 背景工作台** UI Extension。
 
 
 
-## v0.3.5：USER LIVE 几何修复 + 入口图标大小
+## v0.3.6：USER LIVE 几何修复 + 入口图标大小
 
 - **USER LIVE 预览拆分几何来源与样式来源**：位置、尺寸和中心点读取屏幕上真正显示的 `qqaw-protected-user-avatar`；mask、filter、opacity、object-fit 等主题视觉样式仍读取原始 `.avatar img`。这样普通 USER 不会再缩成小块，同时继续兼容复杂蒙版主题。
 - **CHAR 逻辑保持简单**：CHAR 没有 USER 保护层时，几何与主题样式继续来自同一个原始头像。

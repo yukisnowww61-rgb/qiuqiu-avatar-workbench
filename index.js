@@ -2354,14 +2354,29 @@
 
     function copyProtectedAvatarStyle(base, layer) {
         if (!base?.isConnected || !layer?.isConnected) return;
-        const cs = getComputedStyle(base);
+        const avatar = base.parentElement;
+        if (!avatar) return;
 
-        // v0.3.1：保护头像现在与原头像放在同一个 .avatar 容器里。
-        // 这样主题针对 `.mes .avatar img` 的定位、旋转、mask、z-index 等规则
-        // 会自然作用在保护层上，不再把头像搬到 .mes 外层重新计算坐标。
-        // 每次同步前清掉旧主题留下的内联几何，避免切主题后旧值压过新 CSS。
+        // v0.3.6：保护头像必须“叠”在原头像上，而不能作为第二个普通 img
+        // 参与 flex / grid 排版。部分主题（例如青花瓷）会把 .avatar 设成
+        // display:flex，同时给 img 100% 宽高；旧实现会让隐藏原图与保护层各占
+        // 一份 flex 空间，最终 USER 头像被挤到一侧，而 CHAR 因只有一张图正常。
+        //
+        // 处理方式：原图继续留在正常布局中负责撑开尺寸；保护层绝对定位覆盖原图。
+        // 这样既保持主题原有几何，又保留 USER 防回跳保护层。
         layer.removeAttribute('style');
+        layer.style.setProperty('position', 'absolute', 'important'); // 先脱离 flex/grid 流再测量原图
 
+        const avatarStyle = getComputedStyle(avatar);
+        if (avatarStyle.position === 'static') {
+            // relative 不改变普通文档流尺寸，只建立保护层的定位基准。
+            avatar.style.setProperty('position', 'relative', 'important');
+            avatar.dataset.qqawPositionContext = 'true';
+        }
+
+        const cs = getComputedStyle(base);
+        const baseRect = base.getBoundingClientRect();
+        const avatarRect = avatar.getBoundingClientRect();
         const important = (name, value) => {
             if (value != null && value !== '') layer.style.setProperty(name, value, 'important');
         };
@@ -2370,37 +2385,78 @@
             if (value) important(name, value);
         };
 
-        [
-            'position',
-            'left', 'top', 'right', 'bottom',
-            'width', 'height',
-            'min-width', 'min-height', 'max-width', 'max-height',
-            'box-sizing', 'aspect-ratio',
-            'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
-            'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-            'transform', 'transform-origin', 'transform-box',
-            'translate', 'rotate', 'scale',
-            'object-fit', 'object-position', 'object-view-box',
-            'border-radius',
-            'border-top', 'border-right', 'border-bottom', 'border-left',
-            'box-shadow',
-            'opacity', 'filter', 'mix-blend-mode',
-            'clip-path', '-webkit-clip-path',
-            'mask-image', '-webkit-mask-image',
-            'mask-size', '-webkit-mask-size',
-            'mask-position', '-webkit-mask-position',
-            'mask-repeat', '-webkit-mask-repeat',
-            'mask-origin', '-webkit-mask-origin',
-            'mask-clip', '-webkit-mask-clip',
-            'mask-composite', '-webkit-mask-composite',
-            'z-index',
-        ].forEach((name) => copy(name));
+        const offsetParentIsAvatar = base.offsetParent === avatar;
+        if (offsetParentIsAvatar && base.offsetWidth && base.offsetHeight) {
+            // 最优路径：使用未变换的布局几何，再照抄主题 transform。
+            // 这样旋转 / scale / translate 主题也能保持与原图一致。
+            important('left', `${base.offsetLeft}px`);
+            important('top', `${base.offsetTop}px`);
+            important('width', `${base.offsetWidth}px`);
+            important('height', `${base.offsetHeight}px`);
+            copy('transform', 'none');
+            copy('transform-origin', 'center center');
+            copy('transform-box');
+            copy('translate');
+            copy('rotate');
+            copy('scale');
+        } else {
+            // 后备路径：直接使用最终屏幕矩形。这里不再重复套 transform，避免双重位移。
+            important('left', `${baseRect.left - avatarRect.left}px`);
+            important('top', `${baseRect.top - avatarRect.top}px`);
+            important('width', `${baseRect.width}px`);
+            important('height', `${baseRect.height}px`);
+            important('transform', 'none');
+            important('transform-origin', 'center center');
+            important('translate', 'none');
+            important('rotate', 'none');
+            important('scale', 'none');
+        }
+
+        important('right', 'auto');
+        important('bottom', 'auto');
+        important('margin', '0');
+        important('box-sizing', cs.boxSizing || 'border-box');
+        copy('aspect-ratio');
+        copy('padding-top');
+        copy('padding-right');
+        copy('padding-bottom');
+        copy('padding-left');
+        copy('object-fit');
+        copy('object-position');
+        copy('object-view-box');
+        copy('border-radius');
+        copy('border-top');
+        copy('border-right');
+        copy('border-bottom');
+        copy('border-left');
+        copy('box-shadow');
+        copy('opacity');
+        copy('filter');
+        copy('mix-blend-mode');
+        copy('clip-path');
+        copy('-webkit-clip-path');
+        copy('mask-image');
+        copy('-webkit-mask-image');
+        copy('mask-size');
+        copy('-webkit-mask-size');
+        copy('mask-position');
+        copy('-webkit-mask-position');
+        copy('mask-repeat');
+        copy('-webkit-mask-repeat');
+        copy('mask-origin');
+        copy('-webkit-mask-origin');
+        copy('mask-clip');
+        copy('-webkit-mask-clip');
+        copy('mask-composite');
+        copy('-webkit-mask-composite');
+        copy('z-index', '0');
 
         important('pointer-events', 'none');
         important('visibility', 'visible');
+        important('display', cs.display === 'none' ? 'block' : cs.display);
 
-        // 原始头像继续留在 DOM 中，供 SillyTavern / AvatarDeblur 等扩展更新。
-        // 保护层与它同父级并复用主题的头像布局，只隐藏原图本身。
+        // 原始头像继续留在 DOM / flex 布局中，供 SillyTavern / AvatarDeblur 更新并撑住尺寸；
+        // 只隐藏视觉，不把它 display:none，也不移出布局。
         base.style.setProperty('visibility', 'hidden', 'important');
         base.dataset.qqawProtectedHidden = 'true';
     }
