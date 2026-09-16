@@ -100,6 +100,7 @@
             replaceScope: 'permanent',
             modalRect: null,
             previewLayout: 'vertical',
+            themePreviewModes: {},
             workbenchMode: 'avatar',
             backgroundScope: 'chat',
             backgroundPreviewOrientation: 'portrait',
@@ -116,6 +117,7 @@
         settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
         settings.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
         settings.previewLayout = settings.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
+        settings.themePreviewModes ??= {};
         settings.workbenchMode = settings.workbenchMode === 'background' ? 'background' : 'avatar';
         settings.backgroundScope = ['chat', 'theme', 'permanent'].includes(settings.backgroundScope) ? settings.backgroundScope : 'chat';
         settings.backgroundPreviewOrientation = settings.backgroundPreviewOrientation === 'landscape' ? 'landscape' : 'portrait';
@@ -727,10 +729,17 @@
                                         <span>当前头像框预览</span>
                                         <span class="qqaw-live-badge">LIVE</span>
                                     </div>
+                                    <div class="qqaw-theme-preview-mode-row">
+                                        <span class="qqaw-theme-preview-mode-label">头像类型</span>
+                                        <div class="qqaw-theme-preview-mode-switch" role="group" aria-label="头像预览类型">
+                                            <button type="button" class="qqaw-theme-preview-mode-button" data-theme-preview-mode="plain">普通头像</button>
+                                            <button type="button" class="qqaw-theme-preview-mode-button" data-theme-preview-mode="mask">蒙版头像</button>
+                                        </div>
+                                    </div>
                                     <div id="qqaw-theme-preview-viewport" class="qqaw-theme-preview-viewport">
                                         <div id="qqaw-theme-preview-empty" class="qqaw-theme-preview-empty">正在读取当前聊天的头像框…</div>
                                     </div>
-                                    <div class="qqaw-small-note">只读取当前聊天同类型消息的头像容器、遮罩、滤镜与头像装饰，不复制正文、姓名或三元素。拖动或缩放图片时，这里会同步预览最终效果。</div>
+                                    <div id="qqaw-theme-preview-note" class="qqaw-small-note">普通头像模式会保留原消息的布局骨架，但不会显示正文、姓名、三元素或操作按钮。</div>
                                 </div>
                             </div>
                         </section>
@@ -1061,6 +1070,13 @@
                 requestAnimationFrame(() => scheduleThemePreview());
             });
         });
+        modal.querySelectorAll('.qqaw-theme-preview-mode-button').forEach((button) => {
+            button.addEventListener('click', () => {
+                setThemePreviewMode(button.dataset.themePreviewMode);
+                syncThemePreviewModeUi();
+                scheduleThemePreview();
+            });
+        });
         $('#qqaw-launcher-gap').addEventListener('input', () => {
             settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
             $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
@@ -1092,6 +1108,32 @@
         ];
         const value = candidates.find((item) => typeof item === 'string' && item.trim());
         return String(value || '当前美化').trim();
+    }
+
+    function getThemePreviewMode(themeName = getCurrentThemeName()) {
+        return settings.themePreviewModes?.[themeName] === 'mask' ? 'mask' : 'plain';
+    }
+
+    function setThemePreviewMode(mode, themeName = getCurrentThemeName()) {
+        settings.themePreviewModes ??= {};
+        settings.themePreviewModes[themeName] = mode === 'mask' ? 'mask' : 'plain';
+        saveSettings();
+    }
+
+    function syncThemePreviewModeUi() {
+        if (!modal) return;
+        const mode = getThemePreviewMode();
+        modal.querySelectorAll('.qqaw-theme-preview-mode-button').forEach((button) => {
+            const active = button.dataset.themePreviewMode === mode;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        const note = modal.querySelector('#qqaw-theme-preview-note');
+        if (note) {
+            note.textContent = mode === 'mask'
+                ? '蒙版头像模式只抽取头像容器，适合使用 mask、clip-path 或 .avatar::after 装饰的美化；不会复制正文、姓名或三元素。'
+                : '普通头像模式保留原消息的 DOM 布局骨架，但把正文、姓名、三元素和按钮设为不可见，适合不带蒙版、依赖原始排版结构的美化。';
+        }
     }
 
     function getChatBackgroundAssignment() {
@@ -1671,6 +1713,7 @@
             button.classList.toggle('active', active);
             button.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
+        syncThemePreviewModeUi();
     }
 
     function getModalPanel() {
@@ -3067,18 +3110,41 @@
             return;
         }
 
-        // LIVE 预览只镜像头像容器，不再克隆消息正文、姓名、三元素或操作按钮。
-        // 使用空的 message shell 保留 `.mes[is_user=...] .avatar` 这类主题选择器，
-        // 再仅放入 avatar clone，因此头像自身的 ::after 装饰 / mask / transform 仍能继承主题。
-        const clone = sourceMessage.cloneNode(false);
-        clone.classList.add('qqaw-theme-preview-message');
-        clone.setAttribute('aria-hidden', 'true');
-        clone.removeAttribute('id');
-        const avatarClone = sourceAvatar.cloneNode(true);
-        avatarClone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
-        avatarClone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
-        avatarClone.querySelectorAll('img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
-        clone.append(avatarClone);
+        const previewMode = getThemePreviewMode();
+        let clone;
+        let avatarClone;
+
+        if (previewMode === 'mask') {
+            // 蒙版模式：只保留 message shell + avatar subtree。
+            // 适合 mask / clip-path / .avatar::after 等复杂头像装饰，避免正文结构干扰头像框。
+            clone = sourceMessage.cloneNode(false);
+            clone.classList.add('qqaw-theme-preview-message', 'qqaw-preview-mask');
+            clone.setAttribute('aria-hidden', 'true');
+            clone.removeAttribute('id');
+            avatarClone = sourceAvatar.cloneNode(true);
+            avatarClone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+            avatarClone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
+            avatarClone.querySelectorAll('img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
+            clone.append(avatarClone);
+        } else {
+            // 普通模式：保留完整消息 DOM 骨架，维持普通主题依赖的 flex/grid/祖先选择器和尺寸关系。
+            // 整条 clone 使用 visibility:hidden 保留布局，再单独把 avatar subtree 打开，
+            // 因此正文、姓名、三元素和按钮都不可见，但它们仍参与原始排版计算。
+            clone = sourceMessage.cloneNode(true);
+            clone.classList.add('qqaw-theme-preview-message', 'qqaw-preview-plain');
+            clone.setAttribute('aria-hidden', 'true');
+            clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+            clone.querySelectorAll('.qqaw-name-button, .qqaw-protected-user-avatar').forEach((node) => node.remove());
+            avatarClone = clone.querySelector('.avatar');
+            clone.style.setProperty('visibility', 'hidden', 'important');
+            if (avatarClone) {
+                avatarClone.style.setProperty('visibility', 'visible', 'important');
+                avatarClone.querySelectorAll('*').forEach((node) => node.style.setProperty('visibility', 'visible', 'important'));
+                avatarClone.querySelectorAll('img').forEach((img) => img.style.setProperty('visibility', 'hidden', 'important'));
+            }
+            clone.querySelectorAll('button, input, textarea, select, a').forEach((node) => node.setAttribute('tabindex', '-1'));
+        }
+
         const sourceDisplay = getComputedStyle(sourceMessage).display;
         clone.style.setProperty('position', 'absolute', 'important');
         clone.style.setProperty('left', '0px', 'important');
@@ -3705,7 +3771,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.3.2 已加载（精简 LIVE 预览 + Studio UI）');
+            console.info('[丘丘头像工作台] v0.3.3 已加载（普通 / 蒙版双预览入口）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }

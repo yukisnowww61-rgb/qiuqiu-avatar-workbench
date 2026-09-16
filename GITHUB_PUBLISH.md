@@ -1,4 +1,4 @@
-# v0.3.2 发布
+# v0.3.3 发布
 
 ## 本次更新
 
@@ -12,5 +12,8 @@
 Commit 建议：
 
 ```text
-feat: simplify live avatar preview and polish studio UI v0.3.2
+feat: simplify live avatar preview and polish studio UI v0.3.3
 ```
+
+
+v0.3.3 新增普通头像 / 蒙版头像双 LIVE 预览入口，并按主题分别记忆。

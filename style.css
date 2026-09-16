@@ -1066,8 +1066,72 @@
     border: 0 !important;
     box-shadow: none !important;
 }
-#qqaw-modal .qqaw-theme-preview-message > :not(.avatar) { display: none !important; }
-#qqaw-modal .qqaw-theme-preview-message .avatar { visibility: visible !important; }
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-mask > :not(.avatar) { display: none !important; }
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-mask .avatar { visibility: visible !important; }
+
+/* 普通模式保留完整 DOM 排版骨架，只隐藏视觉内容；avatar subtree 单独恢复可见。 */
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain { visibility: hidden !important; }
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .avatar,
+#qqaw-modal .qqaw-theme-preview-message.qqaw-preview-plain .avatar * { visibility: visible !important; }
+
+
+#qqaw-modal .qqaw-theme-preview-mode-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    margin: 8px 0 9px !important;
+    padding: 5px 6px 5px 9px !important;
+    border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 12px !important;
+    background: color-mix(in srgb, #fff 74%, transparent) !important;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 62%) !important;
+}
+#qqaw-modal .qqaw-theme-preview-mode-label {
+    flex: 0 0 auto !important;
+    font-size: .62rem !important;
+    font-weight: 760 !important;
+    color: color-mix(in srgb, var(--qqaw-ink) 64%, transparent) !important;
+    letter-spacing: .02em !important;
+}
+#qqaw-modal .qqaw-theme-preview-mode-switch {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 3px !important;
+    min-width: 150px !important;
+    padding: 3px !important;
+    border-radius: 9px !important;
+    background: color-mix(in srgb, var(--qqaw-blue) 5%, var(--qqaw-surface-2)) !important;
+    box-shadow: inset 0 0 0 1px var(--qqaw-line-soft) !important;
+}
+#qqaw-modal .qqaw-theme-preview-mode-button {
+    appearance: none !important;
+    min-height: 27px !important;
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    border: 0 !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: color-mix(in srgb, var(--qqaw-ink) 64%, transparent) !important;
+    font: inherit !important;
+    font-size: .61rem !important;
+    font-weight: 720 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
+    transition: background .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease !important;
+}
+#qqaw-modal .qqaw-theme-preview-mode-button.active {
+    background: #fff !important;
+    color: var(--qqaw-ink) !important;
+    box-shadow: 0 3px 10px rgb(64 48 55 / 8%), inset 0 0 0 1px color-mix(in srgb, var(--qqaw-pink) 15%, transparent) !important;
+}
+#qqaw-modal .qqaw-theme-preview-mode-button:active { transform: scale(.97) !important; }
+@media (max-width: 520px) {
+    #qqaw-modal .qqaw-theme-preview-mode-row { align-items: stretch !important; flex-direction: column !important; gap: 5px !important; }
+    #qqaw-modal .qqaw-theme-preview-mode-switch { width: 100% !important; min-width: 0 !important; }
+}
 
 #qqaw-modal .qqaw-control-title {
     margin-bottom: 7px !important;
