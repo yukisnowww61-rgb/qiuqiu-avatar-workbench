@@ -1,6 +1,27 @@
-# 丘丘头像工作台 v0.3.0
+# 丘丘头像工作台 v0.3.1
 
 一个面向 SillyTavern / TauriTavern 的 **头像 + 背景工作台** UI Extension。
+
+## v0.3.1：复杂主题头像框兼容修复
+
+本版重点修复开启丘丘头像工作台后，部分带 **mask / 旋转 / 跟随装饰 / 自定义 z-index** 的美化主题中 USER 头像消失的问题。
+
+- USER 保护头像不再作为 `.mes` 的独立悬浮层，而是迁入原本的 `.avatar` 容器；
+- 保护头像会复用主题对 `.mes .avatar img` 的定位体系；
+- 同步原头像的 `left / top / width / height / transform / z-index / mask / clip-path / opacity / filter / object-fit` 等视觉属性；
+- 支持 CSS individual transforms（`translate / rotate / scale`）与 WebKit mask 属性；
+- 切换主题时会先清理保护层上一套主题遗留的内联几何，再读取当前主题样式；
+- 自动迁移 v0.2.1–v0.3.0 已经存在于 `.mes` 外层的旧保护头像节点；
+- 原始 `<img>` 仍保留在 DOM 中供 SillyTavern / AvatarDeblur 更新，只隐藏原图显示，因此不会破坏其数据刷新逻辑。
+
+这类主题原本常见的层级可以继续保持为：
+
+```text
+头像 / 丘丘保护头像   z-index: 2
+头像装饰              z-index: 3
+```
+
+因此像「电子胸花_莓事啦兔🐰」这种用 mask 和跟随装饰构成头像框的主题，不需要为了丘丘工作台额外修改自己的 CSS。
 
 ## v0.3.0 新增：酒馆背景工作台
 

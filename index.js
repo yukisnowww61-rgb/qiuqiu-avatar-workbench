@@ -2280,50 +2280,55 @@
         return `${direct}${separator}qqawdisplay=${encodeURIComponent(userDisplayRevision)}`;
     }
 
-    function copyProtectedAvatarStyle(base, layer, message) {
-        if (!base?.isConnected || !layer?.isConnected || !message?.isConnected) return;
-        const baseRect = base.getBoundingClientRect();
-        const messageRect = message.getBoundingClientRect();
-        if (!baseRect.width || !baseRect.height) return;
+    function copyProtectedAvatarStyle(base, layer) {
+        if (!base?.isConnected || !layer?.isConnected) return;
         const cs = getComputedStyle(base);
+
+        // v0.3.1：保护头像现在与原头像放在同一个 .avatar 容器里。
+        // 这样主题针对 `.mes .avatar img` 的定位、旋转、mask、z-index 等规则
+        // 会自然作用在保护层上，不再把头像搬到 .mes 外层重新计算坐标。
+        // 每次同步前清掉旧主题留下的内联几何，避免切主题后旧值压过新 CSS。
+        layer.removeAttribute('style');
 
         const important = (name, value) => {
             if (value != null && value !== '') layer.style.setProperty(name, value, 'important');
         };
-        important('position', 'absolute');
-        important('left', `${baseRect.left - messageRect.left}px`);
-        important('top', `${baseRect.top - messageRect.top}px`);
-        important('width', `${baseRect.width}px`);
-        important('height', `${baseRect.height}px`);
-        important('margin', '0');
-        important('transform', 'none');
-        important('transform-origin', 'center center');
-        important('object-fit', cs.objectFit || 'cover');
-        important('object-position', cs.objectPosition || '50% 50%');
-        important('border-radius', cs.borderRadius);
-        important('border-top', cs.borderTop);
-        important('border-right', cs.borderRight);
-        important('border-bottom', cs.borderBottom);
-        important('border-left', cs.borderLeft);
-        important('box-shadow', cs.boxShadow);
-        important('opacity', cs.opacity);
-        important('filter', cs.filter);
-        important('clip-path', cs.clipPath);
-        important('-webkit-clip-path', cs.webkitClipPath || cs.clipPath);
-        important('mask-image', cs.maskImage);
-        important('-webkit-mask-image', cs.webkitMaskImage || cs.maskImage);
-        important('mask-size', cs.maskSize);
-        important('-webkit-mask-size', cs.webkitMaskSize || cs.maskSize);
-        important('mask-position', cs.maskPosition);
-        important('-webkit-mask-position', cs.webkitMaskPosition || cs.maskPosition);
-        important('mask-repeat', cs.maskRepeat);
-        important('-webkit-mask-repeat', cs.webkitMaskRepeat || cs.maskRepeat);
+        const copy = (name, fallback = '') => {
+            const value = cs.getPropertyValue(name) || fallback;
+            if (value) important(name, value);
+        };
+
+        [
+            'position',
+            'left', 'top', 'right', 'bottom',
+            'width', 'height',
+            'min-width', 'min-height', 'max-width', 'max-height',
+            'box-sizing', 'aspect-ratio',
+            'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+            'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+            'transform', 'transform-origin', 'transform-box',
+            'translate', 'rotate', 'scale',
+            'object-fit', 'object-position', 'object-view-box',
+            'border-radius',
+            'border-top', 'border-right', 'border-bottom', 'border-left',
+            'box-shadow',
+            'opacity', 'filter', 'mix-blend-mode',
+            'clip-path', '-webkit-clip-path',
+            'mask-image', '-webkit-mask-image',
+            'mask-size', '-webkit-mask-size',
+            'mask-position', '-webkit-mask-position',
+            'mask-repeat', '-webkit-mask-repeat',
+            'mask-origin', '-webkit-mask-origin',
+            'mask-clip', '-webkit-mask-clip',
+            'mask-composite', '-webkit-mask-composite',
+            'z-index',
+        ].forEach((name) => copy(name));
+
         important('pointer-events', 'none');
-        important('z-index', '0');
         important('visibility', 'visible');
 
-        // 原始头像仍留在 DOM 中供 SillyTavern / AvatarDeblur 自己操作，
-        // 但显示层将它遮住。visibility 不参与布局，所以不会改变主题几何。
+        // 原始头像继续留在 DOM 中，供 SillyTavern / AvatarDeblur 等扩展更新。
+        // 保护层与它同父级并复用主题的头像布局，只隐藏原图本身。
         base.style.setProperty('visibility', 'hidden', 'important');
         base.dataset.qqawProtectedHidden = 'true';
     }
@@ -2336,7 +2341,11 @@
         const desired = currentUserDisplayUrl();
         if (!desired) return null;
 
-        let layer = message.querySelector(':scope > .qqaw-protected-user-avatar');
+        // 兼容 v0.2.1–v0.3.0：旧保护层曾直接挂在 .mes 下。
+        // 升级后复用同一节点并迁入 .avatar，避免页面刷新前出现重复头像。
+        const layers = [...message.querySelectorAll('.qqaw-protected-user-avatar')];
+        let layer = layers.shift() || null;
+        layers.forEach((node) => node.remove());
         if (!layer) {
             layer = document.createElement('img');
             layer.className = 'qqaw-protected-user-avatar';
@@ -2344,7 +2353,10 @@
             layer.draggable = false;
             layer.decoding = 'async';
             layer.setAttribute('aria-hidden', 'true');
-            message.append(layer);
+        }
+        if (layer.parentElement !== avatar) {
+            // 放在原头像后、avatar::after 装饰前的内容层。
+            base.insertAdjacentElement('afterend', layer);
         }
 
         if (layer.dataset.qqawDesiredUrl !== desired) {
@@ -2352,7 +2364,7 @@
             layer.removeAttribute('srcset');
             layer.src = desired;
         }
-        copyProtectedAvatarStyle(base, layer, message);
+        copyProtectedAvatarStyle(base, layer);
         const target = getActiveUserTarget();
         const layout = target?.key ? getSavedLayout(target) : null;
         applyLayoutToImage(layer, layout);
@@ -2370,7 +2382,7 @@
 
     function releaseProtectedUserAvatar(message) {
         if (!message) return;
-        message.querySelector(':scope > .qqaw-protected-user-avatar')?.remove();
+        message.querySelectorAll('.qqaw-protected-user-avatar').forEach((node) => node.remove());
         message.querySelectorAll('.avatar img[data-qqaw-protected-hidden="true"]').forEach((img) => {
             img.style.removeProperty('visibility');
             delete img.dataset.qqawProtectedHidden;
@@ -2932,7 +2944,7 @@
 
     function displayedAvatarElement(message) {
         if (!message) return null;
-        const protectedLayer = message.querySelector(':scope > .qqaw-protected-user-avatar');
+        const protectedLayer = message.querySelector('.avatar .qqaw-protected-user-avatar, :scope > .qqaw-protected-user-avatar');
         if (protectedLayer && getComputedStyle(protectedLayer).display !== 'none') return protectedLayer;
         return message.querySelector('.avatar img:not(.qqaw-protected-user-avatar)');
     }
