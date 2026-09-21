@@ -97,7 +97,10 @@
             characterLayouts: {},
             preferredAspect: '2:3',
             launcherGap: 2,
+            launcherOffsetX: 2,
+            launcherOffsetY: 0,
             launcherIconScale: 1,
+            workbenchBackgroundColor: '',
             replaceScope: 'permanent',
             modalRect: null,
             previewLayout: 'vertical',
@@ -115,8 +118,11 @@
         settings = Object.assign(getDefaults(), current);
         settings.personaLayouts ??= {};
         settings.characterLayouts ??= {};
-        settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
+        settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -100, 100);
+        settings.launcherOffsetX = clamp(Number(settings.launcherOffsetX ?? settings.launcherGap ?? 2), -100, 100);
+        settings.launcherOffsetY = clamp(Number(settings.launcherOffsetY ?? 0), -100, 100);
         settings.launcherIconScale = clamp(Number(settings.launcherIconScale ?? 1), 0.6, 2.5);
+        settings.workbenchBackgroundColor = /^#[0-9a-f]{6}$/i.test(String(settings.workbenchBackgroundColor || '')) ? String(settings.workbenchBackgroundColor) : '';
         settings.replaceScope = settings.replaceScope === 'chat' ? 'chat' : 'permanent';
         settings.previewLayout = settings.previewLayout === 'horizontal' ? 'horizontal' : 'vertical';
         settings.themePreviewModes ??= {};
@@ -504,13 +510,14 @@
         const measuredHeight = nameRect.height > 0 ? nameRect.height : fontSize;
         const iconScale = clamp(Number(settings.launcherIconScale ?? 1), 0.6, 2.5);
         const size = clamp(measuredHeight * iconScale, 6, 96);
-        const gap = clamp(Number(settings.launcherGap ?? 2), -24, 60);
+        const offsetX = clamp(Number(settings.launcherOffsetX ?? settings.launcherGap ?? 2), -100, 100);
+        const offsetY = clamp(Number(settings.launcherOffsetY ?? 0), -100, 100);
 
         // 这里使用“姓名坐标 - 宿主坐标”，得到宿主内部坐标。
         // 因为按钮是 absolute 且挂在消息内部，它会天然随着这条消息滚动，
         // 不再需要用 fixed 元素追踪滚动位置。
-        const left = nameRect.right - hostRect.left + host.scrollLeft + gap;
-        const top = nameRect.top - hostRect.top + host.scrollTop + (nameRect.height - size) / 2;
+        const left = nameRect.right - hostRect.left + host.scrollLeft + offsetX;
+        const top = nameRect.top - hostRect.top + host.scrollTop + (nameRect.height - size) / 2 + offsetY;
 
         button.hidden = false;
         button.style.setProperty('--qqaw-name-size', `${size}px`);
@@ -675,6 +682,25 @@
                         </div>
                     </div>
                     <div class="qqaw-window-actions">
+                        <div class="qqaw-color-menu-wrap">
+                            <button type="button" id="qqaw-color-menu" class="qqaw-icon-button qqaw-color-button" aria-label="工作台背景颜色" title="选择工作台背景颜色" aria-expanded="false"><span class="qqaw-color-dot"></span></button>
+                            <div id="qqaw-color-popover" class="qqaw-color-popover" hidden>
+                                <div class="qqaw-color-popover-title">工作台背景</div>
+                                <div class="qqaw-color-swatches" role="group" aria-label="背景颜色预设">
+                                    <button type="button" class="qqaw-color-swatch" data-color="#fff7fb" style="--swatch:#fff7fb" title="奶油粉"></button>
+                                    <button type="button" class="qqaw-color-swatch" data-color="#f1f8ff" style="--swatch:#f1f8ff" title="雾霭蓝"></button>
+                                    <button type="button" class="qqaw-color-swatch" data-color="#f1fbf6" style="--swatch:#f1fbf6" title="薄荷绿"></button>
+                                    <button type="button" class="qqaw-color-swatch" data-color="#f7f3ff" style="--swatch:#f7f3ff" title="薰衣草"></button>
+                                    <button type="button" class="qqaw-color-swatch" data-color="#fff9e8" style="--swatch:#fff9e8" title="奶油黄"></button>
+                                    <button type="button" class="qqaw-color-swatch" data-color="#f5f5f7" style="--swatch:#f5f5f7" title="云灰"></button>
+                                </div>
+                                <label class="qqaw-custom-color-row">
+                                    <span>自定义</span>
+                                    <input id="qqaw-custom-color" type="color" value="#fff7fb" />
+                                </label>
+                                <button type="button" id="qqaw-reset-color" class="qqaw-color-reset">跟随默认</button>
+                            </div>
+                        </div>
                         <button type="button" id="qqaw-reset-window" class="qqaw-icon-button" aria-label="恢复窗口大小" title="恢复窗口大小和位置">↙</button>
                         <button type="button" id="qqaw-close" class="qqaw-icon-button" aria-label="关闭">×</button>
                     </div>
@@ -914,10 +940,14 @@
                                 <input id="qqaw-launcher-icon-scale" type="range" min="0.6" max="2.5" step="0.05" value="1" />
                             </label>
                             <label class="qqaw-slider-row qqaw-gap-control">
-                                <span>图标到姓名距离 <output id="qqaw-gap-value">2 px</output></span>
-                                <input id="qqaw-launcher-gap" type="range" min="-24" max="60" step="1" value="2" />
+                                <span>入口图标左右位置 <output id="qqaw-offset-x-value">2 px</output></span>
+                                <input id="qqaw-launcher-offset-x" type="range" min="-100" max="100" step="1" value="2" />
                             </label>
-                            <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。“入口图标大小”按姓名高度成比例缩放；负距离会让图标更贴近姓名。入口固定在每条消息内部，会随消息一起滚动。</div>
+                            <label class="qqaw-slider-row qqaw-gap-control">
+                                <span>入口图标上下位置 <output id="qqaw-offset-y-value">0 px</output></span>
+                                <input id="qqaw-launcher-offset-y" type="range" min="-100" max="100" step="1" value="0" />
+                            </label>
+                            <div class="qqaw-small-note">支持 PNG / JPG / WebP / GIF。“入口图标大小”按姓名高度成比例缩放；左右与上下位置可分别微调，负值分别向左/向上移动。入口固定在每条消息内部，会随消息一起滚动。</div>
                         </div>
                     </details>
                 </div>
@@ -941,7 +971,19 @@
         const $ = (selector) => modal.querySelector(selector);
         $('#qqaw-close').addEventListener('click', closeWorkbench);
         $('#qqaw-reset-window').addEventListener('click', resetModalWindow);
+        $('#qqaw-color-menu').addEventListener('click', (event) => {
+            event.stopPropagation();
+            toggleWorkbenchColorMenu();
+        });
+        $('#qqaw-color-popover').addEventListener('click', (event) => event.stopPropagation());
+        modal.querySelectorAll('.qqaw-color-swatch').forEach((button) => {
+            button.addEventListener('click', () => setWorkbenchBackgroundColor(button.dataset.color || ''));
+        });
+        $('#qqaw-custom-color').addEventListener('input', () => setWorkbenchBackgroundColor($('#qqaw-custom-color').value, false));
+        $('#qqaw-custom-color').addEventListener('change', () => setWorkbenchBackgroundColor($('#qqaw-custom-color').value, true));
+        $('#qqaw-reset-color').addEventListener('click', () => setWorkbenchBackgroundColor(''));
         modal.addEventListener('click', (event) => {
+            if (!event.target.closest?.('.qqaw-color-menu-wrap')) closeWorkbenchColorMenu();
             if (event.target === modal) closeWorkbench();
         });
 
@@ -1090,14 +1132,70 @@
             saveSettings();
             updateLauncherPositions();
         });
-        $('#qqaw-launcher-gap').addEventListener('input', () => {
-            settings.launcherGap = clamp(Number($('#qqaw-launcher-gap').value), -24, 60);
-            $('#qqaw-gap-value').value = `${settings.launcherGap} px`;
+        $('#qqaw-launcher-offset-x').addEventListener('input', () => {
+            settings.launcherOffsetX = clamp(Number($('#qqaw-launcher-offset-x').value), -100, 100);
+            settings.launcherGap = settings.launcherOffsetX;
+            $('#qqaw-offset-x-value').value = `${settings.launcherOffsetX} px`;
+            saveSettings();
+            updateLauncherPositions();
+        });
+        $('#qqaw-launcher-offset-y').addEventListener('input', () => {
+            settings.launcherOffsetY = clamp(Number($('#qqaw-launcher-offset-y').value), -100, 100);
+            $('#qqaw-offset-y-value').value = `${settings.launcherOffsetY} px`;
             saveSettings();
             updateLauncherPositions();
         });
     }
 
+
+    function workbenchBackgroundColor() {
+        return /^#[0-9a-f]{6}$/i.test(String(settings.workbenchBackgroundColor || ''))
+            ? String(settings.workbenchBackgroundColor)
+            : '';
+    }
+
+    function applyWorkbenchBackgroundColor() {
+        if (!modal) return;
+        const panel = modal.querySelector('#qqaw-modal');
+        const color = workbenchBackgroundColor();
+        if (panel) {
+            if (color) panel.style.setProperty('--qqaw-workbench-base', color);
+            else panel.style.removeProperty('--qqaw-workbench-base');
+        }
+        const dot = modal.querySelector('.qqaw-color-dot');
+        if (dot) dot.style.background = color || 'linear-gradient(135deg,#fff7fb 0 45%,#edf8ff 45% 100%)';
+        const custom = modal.querySelector('#qqaw-custom-color');
+        if (custom && color) custom.value = color;
+        modal.querySelectorAll('.qqaw-color-swatch').forEach((button) => {
+            button.classList.toggle('active', Boolean(color) && button.dataset.color?.toLowerCase() === color.toLowerCase());
+        });
+    }
+
+    function setWorkbenchBackgroundColor(color, persist = true) {
+        const normalized = /^#[0-9a-f]{6}$/i.test(String(color || '')) ? String(color).toLowerCase() : '';
+        settings.workbenchBackgroundColor = normalized;
+        applyWorkbenchBackgroundColor();
+        if (persist) saveSettings();
+    }
+
+    function toggleWorkbenchColorMenu() {
+        if (!modal) return;
+        const popover = modal.querySelector('#qqaw-color-popover');
+        const button = modal.querySelector('#qqaw-color-menu');
+        if (!popover || !button) return;
+        const willOpen = popover.hidden;
+        popover.hidden = !willOpen;
+        button.setAttribute('aria-expanded', String(willOpen));
+        if (willOpen) applyWorkbenchBackgroundColor();
+    }
+
+    function closeWorkbenchColorMenu() {
+        if (!modal) return;
+        const popover = modal.querySelector('#qqaw-color-popover');
+        const button = modal.querySelector('#qqaw-color-menu');
+        if (popover) popover.hidden = true;
+        button?.setAttribute('aria-expanded', 'false');
+    }
 
     function normalizeBackgroundLayout(layout) {
         return {
@@ -1940,8 +2038,12 @@
         modal.querySelector('#qqaw-icon-url').value = settings.iconUrl || DEFAULT_ICON_URL;
         modal.querySelector('#qqaw-launcher-icon-scale').value = settings.launcherIconScale ?? 1;
         modal.querySelector('#qqaw-icon-scale-value').value = `${Number(settings.launcherIconScale ?? 1).toFixed(2)}×`;
-        modal.querySelector('#qqaw-launcher-gap').value = settings.launcherGap ?? 2;
-        modal.querySelector('#qqaw-gap-value').value = `${settings.launcherGap ?? 2} px`;
+        modal.querySelector('#qqaw-launcher-offset-x').value = settings.launcherOffsetX ?? settings.launcherGap ?? 2;
+        modal.querySelector('#qqaw-offset-x-value').value = `${settings.launcherOffsetX ?? settings.launcherGap ?? 2} px`;
+        modal.querySelector('#qqaw-launcher-offset-y').value = settings.launcherOffsetY ?? 0;
+        modal.querySelector('#qqaw-offset-y-value').value = `${settings.launcherOffsetY ?? 0} px`;
+        applyWorkbenchBackgroundColor();
+        closeWorkbenchColorMenu();
         syncTargetUi();
         syncReplaceScopeUi();
         syncPreviewLayoutUi();
@@ -1962,6 +2064,7 @@
 
     function closeWorkbench() {
         if (!modal) return;
+        closeWorkbenchColorMenu();
         modal.classList.add('qqaw-hidden');
         document.body.classList.remove('qqaw-modal-open');
         revokeObjectUrl();

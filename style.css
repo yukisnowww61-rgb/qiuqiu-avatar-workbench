@@ -1,4 +1,4 @@
-/* 丘丘头像工作台 v0.3.6 · clean pastel studio UI */
+/* 丘丘头像工作台 v0.3.7 · clean pastel studio UI */
 
 .qqaw-name-button {
     appearance: none;
@@ -871,10 +871,13 @@
     --qqaw-shadow-soft: 0 4px 14px rgb(69 50 60 / 5%);
     border-radius: 26px !important;
     border: 1px solid color-mix(in srgb, var(--qqaw-pink) 24%, var(--qqaw-line)) !important;
+    --qqaw-workbench-base: #ffffff;
     background:
         radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--qqaw-pink) 13%, transparent), transparent 29%),
         radial-gradient(circle at 100% 2%, color-mix(in srgb, var(--qqaw-blue) 9%, transparent), transparent 25%),
-        linear-gradient(180deg, color-mix(in srgb, #fff 92%, transparent), color-mix(in srgb, #fff 78%, transparent)) !important;
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--qqaw-workbench-base) 94%, #fff 6%),
+            color-mix(in srgb, var(--qqaw-workbench-base) 88%, transparent)) !important;
     box-shadow: 0 30px 90px rgb(47 35 41 / 22%), 0 8px 28px rgb(47 35 41 / 9%) !important;
     backdrop-filter: blur(22px) saturate(1.08) !important;
     -webkit-backdrop-filter: blur(22px) saturate(1.08) !important;
@@ -905,6 +908,43 @@
     border: 1px solid var(--qqaw-line-soft) !important;
     background: color-mix(in srgb, #fff 76%, transparent) !important;
     box-shadow: var(--qqaw-shadow-soft) !important;
+}
+
+#qqaw-modal .qqaw-color-menu-wrap { position: relative !important; display: inline-flex !important; }
+#qqaw-modal .qqaw-color-button { padding: 0 !important; }
+#qqaw-modal .qqaw-color-dot {
+    width: 15px !important; height: 15px !important; border-radius: 50% !important;
+    border: 1px solid rgb(255 255 255 / 86%) !important;
+    box-shadow: 0 0 0 1px var(--qqaw-line-soft), 0 2px 6px rgb(0 0 0 / 9%) !important;
+}
+#qqaw-modal .qqaw-color-popover {
+    position: absolute !important; z-index: 80 !important; top: calc(100% + 8px) !important; right: 0 !important;
+    width: 210px !important; padding: 11px !important; border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 16px !important; background: color-mix(in srgb, #fff 94%, var(--qqaw-workbench-base) 6%) !important;
+    box-shadow: 0 18px 44px rgb(45 35 40 / 18%) !important; backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important; cursor: default !important;
+}
+#qqaw-modal .qqaw-color-popover[hidden] { display: none !important; }
+#qqaw-modal .qqaw-color-popover-title { margin-bottom: 8px !important; font-size: .72rem !important; font-weight: 760 !important; }
+#qqaw-modal .qqaw-color-swatches { display: grid !important; grid-template-columns: repeat(6, 1fr) !important; gap: 7px !important; }
+#qqaw-modal .qqaw-color-swatch {
+    appearance: none !important; width: 24px !important; height: 24px !important; padding: 0 !important;
+    border-radius: 8px !important; border: 1px solid color-mix(in srgb, var(--qqaw-ink) 10%, transparent) !important;
+    background: var(--swatch) !important; box-shadow: inset 0 1px 0 rgb(255 255 255 / 72%) !important; cursor: pointer !important;
+}
+#qqaw-modal .qqaw-color-swatch.active { outline: 2px solid color-mix(in srgb, var(--qqaw-pink) 65%, #fff) !important; outline-offset: 2px !important; }
+#qqaw-modal .qqaw-custom-color-row {
+    display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 10px !important;
+    margin-top: 11px !important; padding-top: 9px !important; border-top: 1px solid var(--qqaw-line-soft) !important; font-size: .7rem !important;
+}
+#qqaw-modal #qqaw-custom-color {
+    width: 42px !important; height: 27px !important; padding: 2px !important; border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 9px !important; background: #fff !important; box-shadow: none !important;
+}
+#qqaw-modal .qqaw-color-reset {
+    width: 100% !important; margin-top: 8px !important; padding: 6px 9px !important; border: 1px solid var(--qqaw-line-soft) !important;
+    border-radius: 10px !important; background: color-mix(in srgb, #fff 78%, transparent) !important; color: inherit !important;
+    font-size: .68rem !important; cursor: pointer !important;
 }
 
 #qqaw-modal .qqaw-body { padding: 14px 15px 18px !important; }
