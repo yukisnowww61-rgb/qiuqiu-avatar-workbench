@@ -1,27 +1,22 @@
-# v0.3.7 发布
+# v0.3.8 发布
 
-本版修复 USER 普通头像 LIVE 预览尺寸/位置错误，并新增姓名旁入口图标大小调节。
+本版重点修复收藏头像缩略图在部分 TauriTavern / iOS WebView 中显示为破图的问题。
 
-## 更新内容
+## 更新文件
 
-- USER LIVE 预览的几何位置改为读取当前真正显示的保护头像层。
-- mask / filter / opacity / object-fit 等视觉样式继续读取原始 `.avatar img`，避免破坏复杂主题兼容。
-- CHAR 保持原有单一头像几何逻辑。
-- 修复 LIVE 空状态提示文字在部分主题下残留的问题。
-- “工作台与入口设置”新增入口图标大小拉条（0.60×–2.50×）。
-- 图标大小与图标到姓名距离分开保存，并实时更新聊天中的丘丘入口。
+- `index.js`
+- `style.css`
+- `manifest.json`
+- `README.md`
 
-建议提交信息：
+## 建议提交信息
 
-```text
-fix: split user preview geometry and add launcher icon scale v0.3.7
-```
+`fix: stabilize favorite avatar thumbnails v0.3.8`
 
+## 主要变化
 
-v0.3.7：修复 flex/grid 主题下 USER 保护头像参与布局导致的半边空白；保护层改为绝对叠加。
-
-
-## v0.3.7
-- 新增右上角工作台背景配色菜单：柔和预设、自定义取色器、恢复默认，自动记忆。
-- 姓名旁入口图标新增左右与上下两个独立位置拉条（-100～100 px）。
-- 保留入口图标大小、头像/背景、LIVE 预览、收藏历史以及 v0.3.6 的 USER 头像兼容修复。
+- 收藏 / 历史缩略图从临时 `blob:` URL 改为持久 Data URL。
+- 自动迁移旧版 Blob 收藏记录。
+- 收藏当前头像优先生成标准 PNG。
+- 自动识别 PNG/JPEG/GIF/WebP MIME。
+- 破损旧记录改用友好占位，不再显示浏览器破图图标。

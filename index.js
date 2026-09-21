@@ -2763,7 +2763,44 @@
         if (!url) throw new Error('找不到要备份的当前头像。');
         const response = await fetch(withCacheBust(url), { cache: 'no-store' });
         if (!response.ok) throw new Error(`读取当前头像失败（HTTP ${response.status}）。`);
-        return response.blob();
+        const blob = await response.blob();
+        if (!blob?.size) throw new Error('读取到的头像文件为空。');
+        return blob;
+    }
+
+    async function normalizeAvatarBlob(blob, hintedType = '') {
+        if (!(blob instanceof Blob) || !blob.size) throw new Error('头像记录里的图片数据不可用。');
+        const bytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+        let detected = '';
+        if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) detected = 'image/png';
+        else if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) detected = 'image/jpeg';
+        else if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 6)).startsWith('GIF8')) detected = 'image/gif';
+        else if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') detected = 'image/webp';
+        const type = detected || (/^image\//i.test(hintedType) ? hintedType : '') || (/^image\//i.test(blob.type) ? blob.type : '') || 'image/png';
+        return blob.type === type ? blob : new Blob([blob], { type });
+    }
+
+    async function blobToDataUrl(blob, hintedType = '') {
+        const normalized = await normalizeAvatarBlob(blob, hintedType);
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(reader.error || new Error('头像缩略图转换失败。'));
+            reader.readAsDataURL(normalized);
+        });
+    }
+
+    async function historyRecordPreviewSource(record) {
+        if (typeof record?.imageDataUrl === 'string' && record.imageDataUrl.startsWith('data:image/')) {
+            return record.imageDataUrl;
+        }
+        if (!(record?.blob instanceof Blob) || !record.blob.size) return '';
+        const dataUrl = await blobToDataUrl(record.blob, record.type);
+        // v0.3.8：把旧版只保存 Blob 的记录顺手迁移为持久缩略图，
+        // 避免 iOS/Tauri WebView 对 blob: object URL 生命周期处理不稳定。
+        record.imageDataUrl = dataUrl;
+        historyPut(record).catch((error) => console.warn('[丘丘头像工作台] 迁移头像缩略图失败', error));
+        return dataUrl;
     }
 
     function permanentAvatarUrl(target) {
@@ -2779,7 +2816,8 @@
             const chatId = getCurrentChatIdentity();
             const currentOverride = scope === 'chat' ? getChatOverrideForTarget(target) : null;
             const sourceUrl = currentOverride ? chatOverrideUrl(currentOverride) : permanentAvatarUrl(target);
-            const blob = await fetchAvatarBlob(sourceUrl);
+            const blob = await normalizeAvatarBlob(await fetchAvatarBlob(sourceUrl));
+            const imageDataUrl = await blobToDataUrl(blob, blob.type);
             const record = {
                 id: globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`,
                 createdAt: Date.now(),
@@ -2792,6 +2830,7 @@
                 wasChatOverride: scope === 'chat' ? Boolean(currentOverride) : false,
                 type: blob.type || 'image/png',
                 blob,
+                imageDataUrl,
             };
             await historyPut(record);
             const records = await historyForTarget(target);
@@ -2808,7 +2847,10 @@
         const favorite = Boolean(record.favorite);
         return `
             <button type="button" class="qqaw-favorite-toggle ${favorite ? 'is-favorite' : ''}" data-action="favorite" aria-label="${favorite ? '取消收藏' : '收藏头像'}" title="${favorite ? '取消收藏' : '收藏头像'}">${favorite ? '♥' : '♡'}</button>
-            <img class="qqaw-history-thumb" alt="${favoriteSection ? '收藏头像' : '历史头像'}" />
+            <div class="qqaw-history-thumb-shell">
+                <div class="qqaw-history-thumb-fallback" aria-hidden="true">图片读取中…</div>
+                <img class="qqaw-history-thumb" alt="${favoriteSection ? '收藏头像' : '历史头像'}" />
+            </div>
             <div class="qqaw-history-meta">
                 <span class="qqaw-history-scope ${record.scope === 'chat' ? 'is-chat' : 'is-permanent'}">${record.scope === 'chat' ? '本次聊天' : '永久'}</span>
                 <span class="qqaw-history-time">${formatHistoryTime(record.createdAt)}</span>
@@ -2819,7 +2861,7 @@
             </div>`;
     }
 
-    function renderRecordList(list, records, favoriteSection = false) {
+    async function renderRecordList(list, records, favoriteSection = false) {
         if (!list) return;
         if (!records.length) {
             list.innerHTML = favoriteSection
@@ -2828,16 +2870,31 @@
             return;
         }
         list.innerHTML = '';
-        records.forEach((record) => {
-            const url = URL.createObjectURL(record.blob);
-            historyObjectUrls.add(url);
+        for (const record of records) {
             const card = document.createElement('article');
             card.className = `qqaw-history-item${record.favorite ? ' is-favorite' : ''}`;
             card.dataset.historyId = record.id;
             card.innerHTML = historyCardHtml(record, favoriteSection);
-            card.querySelector('.qqaw-history-thumb').src = url;
+            const img = card.querySelector('.qqaw-history-thumb');
+            const fallback = card.querySelector('.qqaw-history-thumb-fallback');
             list.append(card);
-        });
+            try {
+                const src = await historyRecordPreviewSource(record);
+                if (!src) throw new Error('头像缩略图数据为空。');
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = () => reject(new Error('头像缩略图解码失败。'));
+                    img.src = src;
+                });
+                card.classList.add('qqaw-thumb-ready');
+                if (fallback) fallback.textContent = '';
+            } catch (error) {
+                console.warn('[丘丘头像工作台] 收藏 / 历史缩略图读取失败', record?.id, error);
+                card.classList.add('qqaw-thumb-error');
+                img.removeAttribute('src');
+                if (fallback) fallback.textContent = '缩略图暂时无法显示';
+            }
+        }
     }
 
     async function renderAvatarLibrary() {
@@ -2849,8 +2906,8 @@
         if (favoriteList) favoriteList.innerHTML = '<div class="qqaw-history-empty">正在读取收藏头像…</div>';
         try {
             const records = await historyForTarget(state.target);
-            renderRecordList(favoriteList, records.filter((record) => record.favorite), true);
-            renderRecordList(historyList, records.filter((record) => !record.favorite), false);
+            await renderRecordList(favoriteList, records.filter((record) => record.favorite), true);
+            await renderRecordList(historyList, records.filter((record) => !record.favorite), false);
         } catch (error) {
             console.error('[丘丘头像工作台] 读取头像收藏 / 历史失败', error);
             if (historyList) historyList.innerHTML = '<div class="qqaw-history-empty">当前环境暂时无法读取头像历史。</div>';
@@ -2882,7 +2939,19 @@
             const override = state.target.kind === 'user' ? getChatOverrideForTarget(state.target) : null;
             const scope = override ? 'chat' : 'permanent';
             const sourceUrl = override ? chatOverrideUrl(override) : permanentAvatarUrl(state.target);
-            const blob = await fetchAvatarBlob(sourceUrl);
+            let blob;
+            // 收藏“当前”时优先从工作台已加载的预览画布生成标准 PNG。
+            // 这样即使 Tauri/iOS 对本地头像响应或 blob: URL 处理特殊，收藏缩略图仍是稳定可解码的图片。
+            if (state.loadedImage) {
+                try {
+                    blob = await renderCropBlob();
+                } catch (error) {
+                    console.warn('[丘丘头像工作台] 从当前预览生成收藏失败，改用头像文件', error);
+                }
+            }
+            if (!blob) blob = await fetchAvatarBlob(sourceUrl);
+            blob = await normalizeAvatarBlob(blob);
+            const imageDataUrl = await blobToDataUrl(blob, blob.type);
             const record = {
                 id: globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`,
                 createdAt: Date.now(),
@@ -2896,6 +2965,7 @@
                 favorite: true,
                 type: blob.type || 'image/png',
                 blob,
+                imageDataUrl,
             };
             await historyPut(record);
             await renderAvatarLibrary();
