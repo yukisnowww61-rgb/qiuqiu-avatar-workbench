@@ -3411,6 +3411,11 @@
         clone.style.setProperty('contain', 'none', 'important');
         clone.style.setProperty('content-visibility', 'visible', 'important');
 
+        // 先以无缩放状态挂载，再读取“预览里真正渲染出来”的头像位置。
+        // 某些美化会用 container query / flex / transform / 绝对定位重新安排 avatar，
+        // 如果继续用原聊天里的 imageRect 推算中心，克隆到工作台后可能会整体偏到一侧。
+        clone.style.setProperty('transform-origin', '0 0', 'important');
+        clone.style.setProperty('transform', 'none', 'important');
         viewport.append(clone);
         const cloneAvatar = clone.querySelector('.avatar');
         if (!cloneAvatar) {
@@ -3426,19 +3431,37 @@
         drawObjectFitPreview(sourceCanvas, candidate, sourceStyle);
         cloneAvatar.append(candidate);
 
-        const vw = Math.max(1, viewport.clientWidth);
-        const vh = Math.max(1, viewport.clientHeight);
-        const localCenterX = imageRect.left - messageRect.left + imageRect.width / 2;
-        const localCenterY = imageRect.top - messageRect.top + imageRect.height / 2;
-        const contextW = Math.max(imageRect.width * 2.25, 220);
-        const contextH = Math.max(imageRect.height * 2.25, 160);
-        const scale = clamp(Math.min(vw / contextW, vh / contextH), 0.08, 2.5);
-        const left = vw / 2 - localCenterX * scale;
-        const top = vh / 2 - localCenterY * scale;
-        clone.style.setProperty('transform-origin', '0 0', 'important');
-        clone.style.setProperty('transform', `scale(${scale})`, 'important');
-        clone.style.setProperty('left', `${left}px`, 'important');
-        clone.style.setProperty('top', `${top}px`, 'important');
+        const centerRenderedPreview = () => {
+            if (!clone.isConnected || !candidate.isConnected) return;
+            const vw = Math.max(1, viewport.clientWidth);
+            const vh = Math.max(1, viewport.clientHeight);
+
+            // 这里故意读取 candidate 在“克隆后的主题结构”中的最终矩形，
+            // 而不是沿用原聊天消息坐标。这样无论主题把头像放在左侧、右侧、
+            // 使用 cqi/cqw、flex 还是绝对定位，LIVE 预览都会把头像本体居中。
+            clone.style.setProperty('transform', 'none', 'important');
+            clone.style.setProperty('left', '0px', 'important');
+            clone.style.setProperty('top', '0px', 'important');
+            const cloneRect = clone.getBoundingClientRect();
+            const focusRect = candidate.getBoundingClientRect();
+            if (!focusRect.width || !focusRect.height) return;
+
+            const localCenterX = focusRect.left - cloneRect.left + focusRect.width / 2;
+            const localCenterY = focusRect.top - cloneRect.top + focusRect.height / 2;
+            const contextW = Math.max(focusRect.width * 2.25, 220);
+            const contextH = Math.max(focusRect.height * 2.25, 160);
+            const scale = clamp(Math.min(vw / contextW, vh / contextH), 0.08, 2.5);
+            const left = vw / 2 - localCenterX * scale;
+            const top = vh / 2 - localCenterY * scale;
+
+            clone.style.setProperty('transform', `scale(${scale})`, 'important');
+            clone.style.setProperty('left', `${left}px`, 'important');
+            clone.style.setProperty('top', `${top}px`, 'important');
+        };
+
+        centerRenderedPreview();
+        // 部分主题的 container query / WebView 布局会在下一帧才稳定，再校正一次。
+        requestAnimationFrame(() => centerRenderedPreview());
         empty.hidden = true;
     }
 

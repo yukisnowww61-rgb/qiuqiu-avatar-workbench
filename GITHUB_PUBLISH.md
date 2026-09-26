@@ -1,6 +1,6 @@
-# v0.3.8 发布
+# v0.3.9 发布
 
-本版重点修复收藏头像缩略图在部分 TauriTavern / iOS WebView 中显示为破图的问题。
+本版重点修复部分美化主题中 LIVE 头像框预览偏到一侧、被裁切的问题。
 
 ## 更新文件
 
@@ -11,12 +11,12 @@
 
 ## 建议提交信息
 
-`fix: stabilize favorite avatar thumbnails v0.3.8`
+`fix: center rendered avatar in live preview v0.3.9`
 
 ## 主要变化
 
-- 收藏 / 历史缩略图从临时 `blob:` URL 改为持久 Data URL。
-- 自动迁移旧版 Blob 收藏记录。
-- 收藏当前头像优先生成标准 PNG。
-- 自动识别 PNG/JPEG/GIF/WebP MIME。
-- 破损旧记录改用友好占位，不再显示浏览器破图图标。
+- LIVE 预览不再直接沿用原聊天头像的坐标中心。
+- 先在工作台内部完成主题克隆布局，再读取真实渲染后的头像矩形。
+- 自动把最终头像本体居中到 LIVE 预览视口。
+- 下一帧进行第二次居中校正，兼容 container query / cqi / flex / WebView 延迟布局。
+- 普通头像与蒙版头像双入口保持不变。
