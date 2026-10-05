@@ -26,6 +26,21 @@
     let modalMoveState = null;
     let modalResizeState = null;
     const launcherMap = new Map();
+    const dirtyLaunchers = new Set();
+    const unsettledLaunchers = new Set();
+    const pendingMessages = new Set();
+    let messageRefreshFrame = 0;
+    let launcherSettleTimer = 0;
+    let chatReapplyTimer = 0;
+    let globalRefreshFrame = 0;
+    let viewportRefreshTimer = 0;
+    let messageResizeObserver = null;
+    let observedChat = null;
+    let backgroundAssetId = '';
+    let backgroundRequestId = 0;
+    let backgroundLoadPromise = null;
+    let backgroundLoadingId = '';
+    const avatarLoadHandlers = new WeakMap();
     const historyObjectUrls = new Set();
     let historyDbPromise = null;
     let userDisplayRevision = Date.now();
@@ -390,6 +405,11 @@
 
     function applyLayoutToImage(img, layout) {
         if (!img) return;
+        const pendingLoad = avatarLoadHandlers.get(img);
+        if (pendingLoad) {
+            img.removeEventListener('load', pendingLoad);
+            avatarLoadHandlers.delete(img);
+        }
         if (!layout || (layout.x === 50 && layout.y === 50 && layout.zoom === 1)) {
             img.classList.remove('qqaw-framed-avatar');
             img.style.removeProperty('--qqaw-x');
@@ -420,7 +440,14 @@
 
         applyViewBox();
         if (!img.complete || !img.naturalWidth) {
-            img.addEventListener('load', applyViewBox, { once: true });
+            const previous = avatarLoadHandlers.get(img);
+            if (previous) img.removeEventListener('load', previous);
+            const onLoad = () => {
+                avatarLoadHandlers.delete(img);
+                applyViewBox();
+            };
+            avatarLoadHandlers.set(img, onLoad);
+            img.addEventListener('load', onLoad, { once: true });
         }
     }
 
@@ -478,6 +505,10 @@
     }
 
     function removeLauncher(message, button) {
+        messageResizeObserver?.unobserve(message);
+        dirtyLaunchers.delete(message);
+        unsettledLaunchers.delete(message);
+        pendingMessages.delete(message);
         button?.remove();
         launcherMap.delete(message);
         if (message?.dataset) delete message.dataset.qqawLauncherAttached;
@@ -519,29 +550,69 @@
         const left = nameRect.right - hostRect.left + host.scrollLeft + offsetX;
         const top = nameRect.top - hostRect.top + host.scrollTop + (nameRect.height - size) / 2 + offsetY;
 
-        button.hidden = false;
-        button.style.setProperty('--qqaw-name-size', `${size}px`);
-        button.style.setProperty('--qqaw-launcher-left', `${left}px`);
-        button.style.setProperty('--qqaw-launcher-top', `${top}px`);
-    }
-
-    function updateLauncherPositions() {
-        launcherPositionFrame = 0;
-        for (const [message, button] of [...launcherMap.entries()]) {
-            positionLauncher(message, button);
+        if (button.hidden) button.hidden = false;
+        for (const [key, value] of [
+            ['--qqaw-name-size', `${size}px`],
+            ['--qqaw-launcher-left', `${left}px`],
+            ['--qqaw-launcher-top', `${top}px`],
+        ]) {
+            if (button.style.getPropertyValue(key) !== value) button.style.setProperty(key, value);
         }
     }
 
-    function scheduleLauncherPositions() {
-        if (launcherPositionFrame) return;
-        launcherPositionFrame = requestAnimationFrame(updateLauncherPositions);
+    function updateLauncherPositions() {
+        scheduleLauncherPositions();
+    }
+
+    function flushLauncherPositions() {
+        launcherPositionFrame = 0;
+        const start = performance.now();
+        let count = 0;
+        for (const message of dirtyLaunchers) {
+            dirtyLaunchers.delete(message);
+            const button = launcherMap.get(message);
+            if (button) positionLauncher(message, button);
+            if (++count >= 24 || performance.now() - start > 6) break;
+        }
+        if (dirtyLaunchers.size) launcherPositionFrame = requestAnimationFrame(flushLauncherPositions);
+    }
+
+    function scheduleLauncherPositions(message) {
+        if (message instanceof Element && message.matches('.mes')) dirtyLaunchers.add(message);
+        else for (const item of launcherMap.keys()) dirtyLaunchers.add(item);
+        if (!launcherPositionFrame && dirtyLaunchers.size) {
+            launcherPositionFrame = requestAnimationFrame(flushLauncherPositions);
+        }
+    }
+
+    function queueMessageRefresh(message) {
+        if (!message?.isConnected || !message.matches('#chat .mes:not(.template_element)')) return;
+        pendingMessages.add(message);
+        if (!messageRefreshFrame) messageRefreshFrame = requestAnimationFrame(flushMessageRefresh);
+    }
+
+    function flushMessageRefresh() {
+        messageRefreshFrame = 0;
+        const start = performance.now();
+        let count = 0;
+        for (const message of pendingMessages) {
+            pendingMessages.delete(message);
+            if (!message.isConnected) continue;
+            createNameButton(message);
+            // applyChatOverrideToMessage already updates the protected layer.
+            if (!applyChatOverrideToMessage(message)) ensureProtectedUserAvatar(message);
+            refreshAllAvatarLayouts(message);
+            scheduleLauncherPositions(message);
+            if (++count >= 12 || performance.now() - start > 6) break;
+        }
+        if (pendingMessages.size) messageRefreshFrame = requestAnimationFrame(flushMessageRefresh);
     }
 
     function createNameButton(message) {
         if (!message?.isConnected) return;
         const existing = launcherMap.get(message);
         if (existing?.isConnected) {
-            scheduleLauncherPositions();
+            scheduleLauncherPositions(message);
             return;
         }
 
@@ -566,12 +637,22 @@
         button.__qqawHost = host;
         launcherMap.set(message, button);
         message.dataset.qqawLauncherAttached = '1';
-        scheduleLauncherPositions();
-
-        // 某些美化会在消息渲染后再做一次布局，延迟校准几次。
-        setTimeout(scheduleLauncherPositions, 50);
-        setTimeout(scheduleLauncherPositions, 300);
-        setTimeout(scheduleLauncherPositions, 1000);
+        scheduleLauncherPositions(message);
+        if (!messageResizeObserver && typeof ResizeObserver === 'function') {
+            messageResizeObserver = new ResizeObserver((entries) => {
+                for (const entry of entries) scheduleLauncherPositions(entry.target);
+            });
+        }
+        messageResizeObserver?.observe(message);
+        // One shared settle pass, rather than three timers per message.
+        unsettledLaunchers.add(message);
+        clearTimeout(launcherSettleTimer);
+        launcherSettleTimer = setTimeout(() => {
+            for (const item of unsettledLaunchers) {
+                if (item.isConnected) scheduleLauncherPositions(item);
+            }
+            unsettledLaunchers.clear();
+        }, 300);
     }
 
     function safeOpenWorkbenchFromMessage(message) {
@@ -612,9 +693,9 @@
         globalLauncherBound = true;
         window.addEventListener('click', handleGlobalLauncherClick, true);
         // 入口现在锚定在每条消息内部，不再跟随滚动重算；只在布局尺寸变化时重新定位。
-        window.addEventListener('resize', scheduleLauncherPositions, { passive: true });
-        window.addEventListener('orientationchange', scheduleLauncherPositions, { passive: true });
-        globalThis.visualViewport?.addEventListener?.('resize', scheduleLauncherPositions, { passive: true });
+        window.addEventListener('resize', scheduleViewportRefresh, { passive: true });
+        window.addEventListener('orientationchange', scheduleViewportRefresh, { passive: true });
+        globalThis.visualViewport?.addEventListener?.('resize', scheduleViewportRefresh, { passive: true });
     }
 
     function openFromSettingsLauncher() {
@@ -656,15 +737,10 @@
     }
 
     function scanMessages(root = document) {
-        const messages = root.matches?.('.mes') ? [root] : [...root.querySelectorAll?.('#chat .mes, .mes') ?? []];
-        messages.forEach((message) => {
-            if (message.classList.contains('template_element') || message.id === 'message_template') return;
-            createNameButton(message);
-        });
-        applyChatScopedOverrides(root);
-        syncProtectedUserAvatarLayers(root);
-        refreshAllAvatarLayouts(root);
-        scheduleLauncherPositions();
+        const scope = root === document ? document.querySelector('#chat') : root;
+        if (!scope) return;
+        if (scope.matches?.('.mes')) queueMessageRefresh(scope);
+        else scope.querySelectorAll?.('.mes').forEach(queueMessageRefresh);
     }
 
     function buildModal() {
@@ -1311,6 +1387,8 @@
     }
 
     function revokeActiveBackgroundObjectUrl() {
+        backgroundAssetId = '';
+        backgroundImageCache = null;
         if (activeBackgroundObjectUrl) {
             URL.revokeObjectURL(activeBackgroundObjectUrl);
             activeBackgroundObjectUrl = '';
@@ -1373,6 +1451,7 @@
     }
 
     async function applyEffectiveBackground() {
+        const requestId = ++backgroundRequestId;
         if (backgroundState.previewing && settings.workbenchMode === 'background' && modal && !modal.classList.contains('qqaw-hidden')) return;
         const assignment = resolveEffectiveBackgroundAssignment();
         if (!assignment?.assetId) {
@@ -1382,15 +1461,46 @@
             return;
         }
         try {
-            const asset = await backgroundAssetGet(assignment.assetId);
-            if (!asset?.blob) throw new Error('背景文件不存在。');
-            revokeActiveBackgroundObjectUrl();
-            activeBackgroundObjectUrl = URL.createObjectURL(asset.blob);
-            const image = await loadImageElement(activeBackgroundObjectUrl);
-            backgroundImageCache = image;
-            renderBackgroundLayer(activeBackgroundObjectUrl, image, assignment.layout || DEFAULT_BACKGROUND_LAYOUT);
+            if (backgroundAssetId !== assignment.assetId || !backgroundImageCache || !activeBackgroundObjectUrl) {
+                if (!backgroundLoadPromise || backgroundLoadingId !== assignment.assetId) {
+                    backgroundLoadingId = assignment.assetId;
+                    const pending = (async () => {
+                        const asset = await backgroundAssetGet(assignment.assetId);
+                        if (!asset?.blob) throw new Error('背景文件不存在。');
+                        const url = URL.createObjectURL(asset.blob);
+                        try {
+                            const image = await loadImageElement(url);
+                            return { url, image };
+                        } catch (error) {
+                            URL.revokeObjectURL(url);
+                            throw error;
+                        }
+                    })();
+                    backgroundLoadPromise = pending;
+                    // Consumers commit first; revoke stale/unclaimed URLs afterwards.
+                    pending.then((loaded) => setTimeout(() => {
+                        if (activeBackgroundObjectUrl !== loaded.url) URL.revokeObjectURL(loaded.url);
+                    }, 0), () => {}).finally(() => {
+                        if (backgroundLoadPromise === pending) {
+                            backgroundLoadPromise = null;
+                            backgroundLoadingId = '';
+                        }
+                    });
+                }
+                const loaded = await backgroundLoadPromise;
+                if (requestId !== backgroundRequestId) return;
+                if (backgroundState.previewing && settings.workbenchMode === 'background'
+                    && modal && !modal.classList.contains('qqaw-hidden')) return;
+                revokeActiveBackgroundObjectUrl();
+                activeBackgroundObjectUrl = loaded.url;
+                backgroundImageCache = loaded.image;
+                backgroundAssetId = assignment.assetId;
+            }
+            if (requestId !== backgroundRequestId) return;
+            renderBackgroundLayer(activeBackgroundObjectUrl, backgroundImageCache, assignment.layout || DEFAULT_BACKGROUND_LAYOUT);
             syncBackgroundSummaryUi();
         } catch (error) {
+            if (requestId !== backgroundRequestId) return;
             console.warn('[丘丘头像工作台] 应用背景失败', error);
             clearBackgroundVisualOverride();
         }
@@ -2425,15 +2535,10 @@
     }
 
     function scheduleChatOverrideReapply() {
-        // CHAT_CHANGED / Persona 刷新后，ST 的消息头像可能分多轮完成渲染。
-        // 多个短延迟 + 属性观察器共同保证最后一轮写回也会被纠正。
-        const run = () => {
-            applyChatScopedOverrides(document);
-            syncProtectedUserAvatarLayers(document);
-            refreshAllAvatarLayouts(document);
-        };
-        requestAnimationFrame(run);
-        [40, 120, 300, 700, 1400].forEach((delay) => setTimeout(run, delay));
+        // The avatar observer handles later src/srcset changes; retain one
+        // coalesced settle pass for asynchronous theme/persona rendering.
+        clearTimeout(chatReapplyTimer);
+        chatReapplyTimer = setTimeout(() => scanMessages(document), 300);
     }
     function refreshChatScopedOverride(target) {
         if (target?.kind !== 'user') return;
@@ -2467,8 +2572,11 @@
         //
         // 处理方式：原图继续留在正常布局中负责撑开尺寸；保护层绝对定位覆盖原图。
         // 这样既保持主题原有几何，又保留 USER 防回跳保护层。
-        layer.removeAttribute('style');
-        layer.style.setProperty('position', 'absolute', 'important'); // 先脱离 flex/grid 流再测量原图
+        // Keep stable styles instead of clearing and rebuilding the layer.
+        if (layer.style.getPropertyValue('position') !== 'absolute'
+            || layer.style.getPropertyPriority('position') !== 'important') {
+            layer.style.setProperty('position', 'absolute', 'important');
+        } // 先脱离 flex/grid 流再测量原图
 
         const avatarStyle = getComputedStyle(avatar);
         if (avatarStyle.position === 'static') {
@@ -2481,7 +2589,10 @@
         const baseRect = base.getBoundingClientRect();
         const avatarRect = avatar.getBoundingClientRect();
         const important = (name, value) => {
-            if (value != null && value !== '') layer.style.setProperty(name, value, 'important');
+            if (value != null && value !== ''
+                && (layer.style.getPropertyValue(name) !== value || layer.style.getPropertyPriority(name) !== 'important')) {
+                layer.style.setProperty(name, value, 'important');
+            }
         };
         const copy = (name, fallback = '') => {
             const value = cs.getPropertyValue(name) || fallback;
@@ -2560,8 +2671,10 @@
 
         // 原始头像继续留在 DOM / flex 布局中，供 SillyTavern / AvatarDeblur 更新并撑住尺寸；
         // 只隐藏视觉，不把它 display:none，也不移出布局。
-        base.style.setProperty('visibility', 'hidden', 'important');
-        base.dataset.qqawProtectedHidden = 'true';
+        if (base.style.getPropertyValue('visibility') !== 'hidden' || base.style.getPropertyPriority('visibility') !== 'important') {
+            base.style.setProperty('visibility', 'hidden', 'important');
+        }
+        if (base.dataset.qqawProtectedHidden !== 'true') base.dataset.qqawProtectedHidden = 'true';
     }
 
     function ensureProtectedUserAvatar(message) {
@@ -3907,25 +4020,33 @@
         if (!source?.on || !types) return;
 
         const refresh = () => {
-            setTimeout(() => {
+            if (globalRefreshFrame) return;
+            globalRefreshFrame = requestAnimationFrame(() => {
+                globalRefreshFrame = 0;
+                startObserver();
                 scanMessages(document);
                 scheduleChatOverrideReapply();
                 scheduleBackgroundApply();
                 syncBackgroundSummaryUi();
-            }, 0);
+            });
+        };
+        const refreshMessage = (messageId) => {
+            const chat = document.querySelector('#chat');
+            if (!chat) return;
+            const id = Number(messageId);
+            const message = messageId != null && Number.isInteger(id)
+                ? chat.querySelector(`.mes[mesid="${id}"]`) : null;
+            queueMessageRefresh(message || chat.querySelector('.mes:last-child'));
         };
 
-        [
-            types.CHAT_CHANGED,
-            types.CHARACTER_EDITED,
-            types.PERSONA_CHANGED,
-            types.PERSONA_UPDATED,
-            types.MESSAGE_RECEIVED,
-            types.MESSAGE_UPDATED,
-            types.USER_MESSAGE_RENDERED,
-            types.SETTINGS_UPDATED,
-            types.THEME_CHANGED,
-        ].filter(Boolean).forEach((eventName) => source.on(eventName, refresh));
+        [...new Set([
+            types.CHAT_CHANGED, types.CHARACTER_EDITED, types.PERSONA_CHANGED,
+            types.PERSONA_UPDATED, types.SETTINGS_UPDATED, types.THEME_CHANGED,
+        ].filter(Boolean))].forEach((eventName) => source.on(eventName, refresh));
+        [...new Set([
+            types.MESSAGE_RECEIVED, types.MESSAGE_UPDATED, types.USER_MESSAGE_RENDERED,
+            types.CHARACTER_MESSAGE_RENDERED,
+        ].filter(Boolean))].forEach((eventName) => source.on(eventName, refreshMessage));
 
         if (types.MESSAGE_SENT) {
             source.on(types.MESSAGE_SENT, async (messageId) => {
@@ -3934,7 +4055,7 @@
                     const index = Number(messageId);
                     const message = Number.isInteger(index) ? ctx.chat?.[index] : null;
                     if (!message?.is_user) {
-                        refresh();
+                        refreshMessage(messageId);
                         return;
                     }
 
@@ -3950,7 +4071,7 @@
                 } catch (error) {
                     console.warn('[丘丘头像工作台] 新 USER 消息同步临时头像失败', error);
                 } finally {
-                    refresh();
+                    refreshMessage(messageId);
                 }
             });
         }
@@ -3958,42 +4079,67 @@
 
     function startObserver() {
         const root = document.querySelector('#chat') || document.body;
+        if (observer && observedChat === root) return;
+        observer?.disconnect();
+        observedChat?.removeEventListener('load', handleAvatarLoad, true);
+        for (const [message, button] of launcherMap) {
+            if (!message.isConnected) removeLauncher(message, button);
+        }
+        observedChat = root;
         observer = new MutationObserver((mutations) => {
-            const messagesToReapply = new Set();
+            let removedMessages = false;
             for (const mutation of mutations) {
-                if (mutation.type === 'childList') {
-                    mutation.addedNodes.forEach((node) => {
-                        if (!(node instanceof Element)) return;
-                        scanMessages(node);
-                    });
+                const element = mutation.target instanceof Element ? mutation.target : null;
+                if (mutation.type === 'attributes') {
+                    // Only real avatar sources matter. Ignore generated layers,
+                    // launcher icons and images embedded in message text.
+                    if (!element?.matches('.avatar img:not(.qqaw-protected-user-avatar), .avatar picture source')) continue;
+                    queueMessageRefresh(element.closest('.mes'));
                     continue;
                 }
-
-                // 关键修复：ST / 主题可能在消息已经存在后，再异步修改头像的
-                // src / srcset。旧版只监听 addedNodes，因此最后一次写回永久头像
-                // 无法被发现。现在属性变化也会触发对应消息的临时头像重应用。
-                if (mutation.type === 'attributes') {
-                    const element = mutation.target instanceof Element ? mutation.target : null;
-                    const message = element?.closest?.('.mes');
-                    if (message?.getAttribute('is_user') === 'true') messagesToReapply.add(message);
+                if (mutation.type !== 'childList') continue;
+                if (!mutation.removedNodes.length && mutation.addedNodes.length
+                    && [...mutation.addedNodes].every((node) => node instanceof Element
+                        && node.matches('.qqaw-name-button, .qqaw-protected-user-avatar'))) continue;
+                for (const node of mutation.removedNodes) {
+                    if (node instanceof Element && (node.matches('.mes') || node.querySelector('.mes'))) removedMessages = true;
                 }
+                if (element?.closest('.mes_text, .qqaw-name-button, #qqaw-overlay')) continue;
+                for (const node of mutation.addedNodes) {
+                    if (!(node instanceof Element)) continue;
+                    if (node.matches('.qqaw-name-button, .qqaw-protected-user-avatar')) continue;
+                    if (node.matches('.mes') || node.querySelector('.mes')) scanMessages(node);
+                    else if (node.matches('.avatar, .avatar img, .name_text, .ch_name')
+                        || node.querySelector('.avatar, .name_text, .ch_name')) queueMessageRefresh(node.closest('.mes'));
+                }
+                if (element?.closest('.avatar, .ch_name, .name_text')) queueMessageRefresh(element.closest('.mes'));
             }
-
-            if (messagesToReapply.size) {
-                queueMicrotask(() => {
-                    messagesToReapply.forEach((message) => {
-                        applyChatOverrideToMessage(message);
-                        ensureProtectedUserAvatar(message);
-                    });
-                });
+            if (removedMessages) {
+                for (const [message, button] of launcherMap) {
+                    if (!message.isConnected) removeLauncher(message, button);
+                }
             }
         });
         observer.observe(root, {
-            childList: true,
-            subtree: true,
-            attributes: true,
+            childList: true, subtree: true, attributes: true,
             attributeFilter: ['src', 'srcset'],
         });
+        root.addEventListener('load', handleAvatarLoad, true);
+    }
+
+    function handleAvatarLoad(event) {
+        if (event.target?.matches?.('.avatar img:not(.qqaw-protected-user-avatar)')) {
+            queueMessageRefresh(event.target.closest('.mes'));
+        }
+    }
+
+    function scheduleViewportRefresh() {
+        clearTimeout(viewportRefreshTimer);
+        viewportRefreshTimer = setTimeout(() => {
+            scanMessages(document);
+            if (backgroundState.previewing) previewBackgroundOnTavern();
+            else scheduleBackgroundApply();
+        }, 100);
     }
 
     async function waitForSillyTavern() {
@@ -4015,16 +4161,7 @@
             scanMessages(document);
             bindSillyTavernEvents();
             startObserver();
-            window.addEventListener('resize', () => {
-                syncProtectedUserAvatarLayers(document);
-                if (backgroundState.previewing) previewBackgroundOnTavern();
-                else scheduleBackgroundApply();
-            }, { passive: true });
-            globalThis.visualViewport?.addEventListener?.('resize', () => {
-                syncProtectedUserAvatarLayers(document);
-                if (backgroundState.previewing) previewBackgroundOnTavern();
-                else scheduleBackgroundApply();
-            }, { passive: true });
+            document.fonts?.ready?.then(() => scheduleLauncherPositions());
             document.addEventListener('change', (event) => {
                 if (event.target?.matches?.('#themes, #ui-preset-name, select[name="theme"]')) {
                     setTimeout(() => {
@@ -4043,7 +4180,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.3.4 已加载（普通预览恢复 v0.3.0 骨架）');
+            console.info('[丘丘头像工作台] v0.3.10 已加载（按需刷新与背景缓存）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
