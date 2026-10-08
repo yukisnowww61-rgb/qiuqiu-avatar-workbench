@@ -646,7 +646,14 @@
 }
 .qqaw-settings-launcher-title { display: inline-flex; align-items: center; gap: 7px; margin-right: auto; }
 .qqaw-settings-launcher-title img { width: 1.35em; height: 1.35em; object-fit: contain; }
+.qqaw-settings-launcher-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.qqaw-settings-launcher-actions .menu_button { margin: 0; white-space: nowrap; }
 .qqaw-settings-launcher small { flex-basis: 100%; opacity: .62; }
+@media (max-width: 480px) {
+    .qqaw-settings-launcher-title { flex-basis: 100%; }
+    .qqaw-settings-launcher-actions { width: 100%; }
+    .qqaw-settings-launcher-actions .menu_button { flex: 1; }
+}
 
 /* “仅本次聊天”使用内部临时头像文件，不让它们挤进 Persona 头像列表。 */
 #user_avatar_block [imgfile^="__qqaw_chat_"] { display: none !important; }

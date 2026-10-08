@@ -108,6 +108,7 @@
     function getDefaults() {
         return {
             iconUrl: DEFAULT_ICON_URL,
+            showChatLaunchers: true,
             personaLayouts: {},
             characterLayouts: {},
             preferredAspect: '2:3',
@@ -131,6 +132,7 @@
     function ensureSettings() {
         const current = context.extensionSettings?.[MODULE_ID] ?? {};
         settings = Object.assign(getDefaults(), current);
+        settings.showChatLaunchers = settings.showChatLaunchers !== false;
         settings.personaLayouts ??= {};
         settings.characterLayouts ??= {};
         settings.launcherGap = clamp(Number(settings.launcherGap ?? 2), -100, 100);
@@ -504,17 +506,21 @@
         return message;
     }
 
-    function removeLauncher(message, button) {
+    function removeLauncher(message, button, preserveMessageRefresh = false) {
         messageResizeObserver?.unobserve(message);
         dirtyLaunchers.delete(message);
         unsettledLaunchers.delete(message);
-        pendingMessages.delete(message);
+        if (!preserveMessageRefresh) pendingMessages.delete(message);
         button?.remove();
         launcherMap.delete(message);
         if (message?.dataset) delete message.dataset.qqawLauncherAttached;
     }
 
     function positionLauncher(message, button) {
+        if (!settings.showChatLaunchers) {
+            removeLauncher(message, button);
+            return;
+        }
         if (!message?.isConnected || !button?.isConnected) {
             removeLauncher(message, button);
             return;
@@ -578,6 +584,7 @@
     }
 
     function scheduleLauncherPositions(message) {
+        if (!settings.showChatLaunchers) return;
         if (message instanceof Element && message.matches('.mes')) dirtyLaunchers.add(message);
         else for (const item of launcherMap.keys()) dirtyLaunchers.add(item);
         if (!launcherPositionFrame && dirtyLaunchers.size) {
@@ -609,7 +616,7 @@
     }
 
     function createNameButton(message) {
-        if (!message?.isConnected) return;
+        if (!settings.showChatLaunchers || !message?.isConnected) return;
         const existing = launcherMap.get(message);
         if (existing?.isConnected) {
             scheduleLauncherPositions(message);
@@ -670,6 +677,7 @@
     }
 
     function handleGlobalLauncherClick(event) {
+        if (!settings.showChatLaunchers) return;
         const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
         const button = path.find?.((node) => node instanceof Element && node.classList?.contains('qqaw-name-button'))
             || (event.target instanceof Element ? event.target.closest('.qqaw-name-button') : null);
@@ -712,6 +720,38 @@
         }
     }
 
+    function syncChatLauncherToggle() {
+        const button = document.querySelector('#qqaw-settings-toggle-icons');
+        if (!button) return;
+        button.textContent = settings.showChatLaunchers ? '隐藏聊天图标' : '显示聊天图标';
+        button.setAttribute('aria-pressed', String(!settings.showChatLaunchers));
+        button.title = settings.showChatLaunchers
+            ? '隐藏所有 USER / CHAR 姓名旁的入口图标'
+            : '显示所有 USER / CHAR 姓名旁的入口图标';
+        const status = document.querySelector('#qqaw-settings-icon-status');
+        if (status) status.textContent = settings.showChatLaunchers
+            ? '聊天图标已显示；如果被当前美化遮挡，可以从这里打开工作台。'
+            : '聊天图标已隐藏；仍可从这里打开工作台。此选择会自动保存。';
+    }
+
+    function toggleChatLaunchers() {
+        settings.showChatLaunchers = !settings.showChatLaunchers;
+        if (!settings.showChatLaunchers) {
+            // 移除入口并停止定位任务，避免隐藏后继续加载图标或测量姓名。
+            cancelAnimationFrame(launcherPositionFrame);
+            launcherPositionFrame = 0;
+            clearTimeout(launcherSettleTimer);
+            launcherSettleTimer = 0;
+            for (const [message, button] of launcherMap) removeLauncher(message, button, true);
+            dirtyLaunchers.clear();
+            unsettledLaunchers.clear();
+        } else {
+            scanMessages(document);
+        }
+        syncChatLauncherToggle();
+        saveSettings();
+    }
+
     function addSettingsLauncher() {
         if (settingsLauncherAdded || document.querySelector('#qqaw-settings-launcher')) return;
         const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings');
@@ -728,11 +768,16 @@
                 <img alt="" src="${getIconUrl().replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
                 <b>丘丘头像工作台</b>
             </div>
-            <button type="button" class="menu_button" id="qqaw-settings-open">打开工作台</button>
-            <small>如果聊天姓名后的图标被当前美化拦截，可以先从这里打开。</small>
+            <div class="qqaw-settings-launcher-actions">
+                <button type="button" class="menu_button" id="qqaw-settings-toggle-icons" aria-controls="chat">隐藏聊天图标</button>
+                <button type="button" class="menu_button" id="qqaw-settings-open">打开工作台</button>
+            </div>
+            <small id="qqaw-settings-icon-status" role="status"></small>
         `;
         host.append(wrap);
         wrap.querySelector('#qqaw-settings-open')?.addEventListener('click', openFromSettingsLauncher);
+        wrap.querySelector('#qqaw-settings-toggle-icons')?.addEventListener('click', toggleChatLaunchers);
+        syncChatLauncherToggle();
         settingsLauncherAdded = true;
     }
 
@@ -4180,7 +4225,7 @@
                 }
                 notify('info', '已升级本次聊天头像逻辑，并重新同步当前聊天的 USER 头像。');
             }
-            console.info('[丘丘头像工作台] v0.3.10 已加载（按需刷新与背景缓存）');
+            console.info('[丘丘头像工作台] v0.3.11 已加载（聊天图标显示开关）');
         } catch (error) {
             console.error('[丘丘头像工作台] 初始化失败', error);
         }
